@@ -1,0 +1,47 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node
+node_modules/
+.next/
+out/
+.turbo/
+*.tsbuildinfo
+
+# Local state
+.env
+.env.local
+backend/data/**
+!backend/data/.gitkeep
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+
+# LibreOffice lock files left beside the design doc
+docs/.~lock.*
+docs/*.tmp
+
+# ---- Added: standardized patterns ----
+dist/
+build/
+env/
+.mypy_cache/
+keys/
+!keys/.gitkeep
+*.pem
+*.key
+.env.*
+!.env.example
+yarn-error.log*
+pnpm-debug.log*

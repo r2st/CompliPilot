@@ -1,0 +1,35 @@
+# CompliPilot backend — runtime dependencies.
+# Dev/test extras live in requirements-dev.txt.
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlalchemy>=2.0
+psycopg[binary]>=3.1
+alembic>=1.13
+pydantic>=2.7
+pydantic-settings>=2.3
+python-jose[cryptography]>=3.3
+# AES-256-GCM for the column-level PII encryption of section 8.1. Pulled in by
+# python-jose already; named explicitly because app.core.crypto imports it
+# directly and that dependency should not be implicit.
+cryptography>=42.0
+bcrypt>=4.1
+python-multipart>=0.0.9
+email-validator>=2.1
+httpx>=0.27
+
+# Queue and scheduler. The design document names BullMQ; that is a Node
+# library and this backend is Python, so the same Redis is driven by Celery
+# instead — same broker, same semantics, one language in the service.
+celery[redis]>=5.4
+redis>=5.0
+
+# TOTP for the mandatory 2FA on Admin and Compliance Manager roles.
+pyotp>=2.9
+
+# Regulatory notice ingestion. PDFs are read as text first and only fall back
+# to OCR when a page carries none — i.e. when it is a scan.
+pypdf>=4.2
+python-docx>=1.1
+beautifulsoup4>=4.12
+lxml>=5.2

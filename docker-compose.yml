@@ -1,0 +1,162 @@
+# Local development stack: Postgres, Redis, the API, a Celery worker and beat,
+# and the Next.js dashboard.
+#
+#   cp .env.example .env      # fill in OPENROUTER_API_KEY for the AI features
+#   docker compose up --build
+#   open http://localhost:3000
+#
+# The API runs migrations on start, so there is no separate setup step. To run
+# a one-shot command against the same image:
+#
+#   docker compose run --rm api alembic history
+#
+# There is no `version:` key — it has been ignored since Compose v2 and only
+# produces a warning.
+
+name: complipilot
+
+x-api-env: &api-env
+  ENVIRONMENT: ${ENVIRONMENT:-development}
+  DEBUG: ${DEBUG:-true}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  LOG_FORMAT: ${LOG_FORMAT:-console}
+  # Every one of these is a development-only value, defaulted so that
+  # `docker compose up` works from a bare checkout with no .env. The production
+  # deployment supplies its own, and validate_startup_config refuses to boot if
+  # it does not.
+  JWT_SECRET: ${JWT_SECRET:-dev-only-secret-change-me-in-any-real-deployment}
+  DATABASE_URL: postgresql+psycopg://complipilot:complipilot@postgres:5432/complipilot
+  REDIS_URL: redis://redis:6379/0
+  CELERY_BROKER_URL: redis://redis:6379/1
+  CELERY_RESULT_BACKEND: redis://redis:6379/2
+  CELERY_ENABLED: ${CELERY_ENABLED:-true}
+  BACKEND_CORS_ORIGINS: ${BACKEND_CORS_ORIGINS:-http://localhost:3000}
+  UPLOAD_DIR: /app/data/documents
+  MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-25}
+  # TOTP is mandatory in production; off by default here so a development stack
+  # can be driven without an authenticator app.
+  REQUIRE_TOTP_FOR_PRIVILEGED_ROLES: ${REQUIRE_TOTP_FOR_PRIVILEGED_ROLES:-false}
+  OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+  OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-oss-20b:free}
+  OPENROUTER_VISION_MODEL: ${OPENROUTER_VISION_MODEL:-qwen/qwen2.5-vl-72b-instruct:free}
+  SMTP_HOST: ${SMTP_HOST:-}
+  SMTP_PORT: ${SMTP_PORT:-587}
+  SMTP_USERNAME: ${SMTP_USERNAME:-}
+  SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+  WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID:-}
+  WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: complipilot
+      POSTGRES_PASSWORD: complipilot
+      POSTGRES_DB: complipilot
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      # Exposed so psql and a locally-run test suite can reach it. Not 5432 on the
+      # host to avoid colliding with a Postgres already installed there, and
+      # with the several other product stacks already bound on this machine.
+      - "${POSTGRES_PORT:-5437}:5432"
+    healthcheck:
+      # -U matters: without it pg_isready checks the OS user, which passes
+      # before the database this app uses actually exists.
+      test: ["CMD-SHELL", "pg_isready -U complipilot -d complipilot"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    # Rate-limit counters and cached calendars are both reconstructible, so
+    # persistence buys nothing and costs a fsync on every write.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "${REDIS_PORT:-6382}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment: *api-env
+    volumes:
+      # Named volume rather than a bind mount: uploaded notices should survive
+      # `docker compose down` but not clutter the working tree.
+      - document-data:/app/data
+    ports:
+      - "${API_PORT:-8000}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["worker"]
+    environment: *api-env
+    volumes:
+      # The same volume as the API, and it has to be: the worker parses the
+      # file the API wrote, and only the row id goes through the broker.
+      - document-data:/app/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      # Not service_healthy — the worker serves no traffic, and waiting on the
+      # API's healthcheck would only delay it behind the migration.
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["beat"]
+    environment: *api-env
+    # No volume: beat publishes a task name and a timestamp and never opens a
+    # document. Its schedule file lives inside the container, which is the
+    # right lifetime — a fresh stack should start from a fresh schedule rather
+    # than immediately firing yesterday's missed reminder sweep.
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        # Baked at build time: Next.js inlines NEXT_PUBLIC_* into the client
+        # bundle, so setting it only at runtime would leave the browser calling
+        # the build-time default.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+    environment:
+      NODE_ENV: production
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+  document-data:
