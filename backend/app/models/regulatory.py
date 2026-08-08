@@ -12,7 +12,6 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -23,6 +22,7 @@ from app.models.mixins import (
     OrgScopedMixin,
     SoftDeleteMixin,
     TimestampMixin,
+    live_unique,
 )
 
 
@@ -94,9 +94,7 @@ class RegulatoryUpdate(Base, TimestampMixin, SoftDeleteMixin):
         # regulator's reference identifies the document; where a source
         # publishes no reference number the title stands in, which is why the
         # constraint carries all three.
-        UniqueConstraint(
-            "source", "reference_no", "title", "deleted_at", name="uq_reg_updates_source_ref"
-        ),
+        live_unique("uq_reg_updates_source_ref", "source", "reference_no", "title"),
         Index("ix_reg_updates_published", "published_date", "impact_level"),
         Index("ix_reg_updates_pending", "is_analysed", "published_date"),
     )
@@ -150,9 +148,7 @@ class RegulatoryImpact(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (
         # One assessment per (org, update). Re-running the mapper updates the
         # existing row rather than stacking duplicates in the alert list.
-        UniqueConstraint(
-            "organization_id", "update_id", "deleted_at", name="uq_impact_org_update"
-        ),
+        live_unique("uq_impact_org_update", "organization_id", "update_id"),
         Index("ix_impacts_org_level", "organization_id", "impact_level"),
         Index("ix_impacts_org_open", "organization_id", "is_acknowledged"),
         Index("ix_regulatory_impacts_org_created", "organization_id", "created_at"),

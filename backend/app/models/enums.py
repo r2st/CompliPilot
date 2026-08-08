@@ -1,20 +1,38 @@
 """Enumerations shared by the models, schemas and rule engine.
 
-Every one of these is ``(str, Enum)`` on purpose: members must compare equal to
-their stored string, because the columns are declared with
-``Enum(..., native_enum=False)`` and Pydantic serializes them straight to JSON.
+Every one of these is a :class:`enum.StrEnum`: members compare equal to their
+stored string, and — the part that matters — ``str(member)`` yields the *value*
+rather than ``"ClassName.MEMBER"``.
+
+That second property is load-bearing, not cosmetic. These enums are stringified
+in three places where the result is compared or hashed rather than merely
+displayed: :func:`role_rank` looks a role up in a dict, the audit chain hashes
+``str(action)`` into every checksum, and the JWT carries ``str(role)`` as a
+claim. A plain ``(str, Enum)`` returns ``"UserRole.ADMIN"`` from ``str()`` under
+Python 3.11, which made every one of those silently wrong — and made
+``role_rank`` return ``-1`` for *both* sides of a permission comparison, so
+``at_least()`` answered True for every role against every requirement. The
+whole RBAC layer was open. ``StrEnum`` is what closes it; see
+``tests/test_enums.py``, which asserts the property directly rather than
+trusting the base class to keep it.
 
 The values are the wire format. Renaming one is a migration and an API break,
 so they are written as the regulator writes them wherever a regulator has an
 opinion (``GSTR-3B``, ``MGT-7``), and as lowercase snake_case where nobody
 does.
+
+Note that the *database* stores the member name, not the value: SQLAlchemy's
+``Enum`` type persists ``.name`` by default, so the column holds ``ADMIN``
+while the API emits ``admin``. Both directions go through SQLAlchemy and
+Pydantic respectively, so nothing has to convert by hand — but a hand-written
+SQL query has to match on the name.
 """
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class OrgType(str, Enum):
+class OrgType(StrEnum):
     """Which side of the CA firm → client hierarchy an organization sits on.
 
     A ``ca_firm`` has ``clients`` rows pointing at the companies it acts for; a
@@ -27,7 +45,7 @@ class OrgType(str, Enum):
     COMPANY = "company"
 
 
-class EntityType(str, Enum):
+class EntityType(StrEnum):
     """Legal form of a company, which is what most obligations key off.
 
     A private limited company owes MGT-7 and AOC-4; an LLP owes Form 8 and
@@ -48,7 +66,7 @@ class EntityType(str, Enum):
     HUF = "huf"
 
 
-class Regulation(str, Enum):
+class Regulation(StrEnum):
     """The eight regulatory domains of the coverage matrix (section 5)."""
 
     GST = "gst"
@@ -61,7 +79,7 @@ class Regulation(str, Enum):
     DPDP = "dpdp"
 
 
-class Frequency(str, Enum):
+class Frequency(StrEnum):
     """How often an obligation recurs.
 
     ``EVENT_BASED`` is not a schedule: FC-GPR is due 30 days after an
@@ -77,7 +95,7 @@ class Frequency(str, Enum):
     ONE_TIME = "one_time"
 
 
-class FilingStatus(str, Enum):
+class FilingStatus(StrEnum):
     """Lifecycle of one filing instance.
 
     The legal transitions live in :mod:`app.services.filing_workflow`; this is
@@ -100,7 +118,7 @@ class FilingStatus(str, Enum):
     NOT_APPLICABLE = "not_applicable"
 
 
-class ImpactLevel(str, Enum):
+class ImpactLevel(StrEnum):
     """Priority band for a regulatory update or its per-client impact."""
 
     CRITICAL = "critical"
@@ -110,7 +128,7 @@ class ImpactLevel(str, Enum):
     NONE = "none"
 
 
-class UserRole(str, Enum):
+class UserRole(StrEnum):
     """The four default roles of section 8.2, most privileged first.
 
     Ordering is meaningful and :func:`role_rank` depends on it: permission
@@ -147,14 +165,14 @@ def role_rank(role: UserRole | str) -> int:
     return _ROLE_ORDER.get(str(role), -1)
 
 
-class NotificationChannel(str, Enum):
+class NotificationChannel(StrEnum):
     WHATSAPP = "whatsapp"
     EMAIL = "email"
     SMS = "sms"
     IN_APP = "in_app"
 
 
-class NotificationStatus(str, Enum):
+class NotificationStatus(StrEnum):
     PENDING = "pending"
     SENT = "sent"
     FAILED = "failed"
@@ -164,7 +182,7 @@ class NotificationStatus(str, Enum):
     SKIPPED = "skipped"
 
 
-class DocumentType(str, Enum):
+class DocumentType(StrEnum):
     REGULATORY_NOTICE = "regulatory_notice"
     CIRCULAR = "circular"
     SHOW_CAUSE_NOTICE = "show_cause_notice"
@@ -174,14 +192,14 @@ class DocumentType(str, Enum):
     OTHER = "other"
 
 
-class ParseStatus(str, Enum):
+class ParseStatus(StrEnum):
     PENDING = "pending"
     PROCESSING = "processing"
     PARSED = "parsed"
     FAILED = "failed"
 
 
-class AuditAction(str, Enum):
+class AuditAction(StrEnum):
     """What an audit entry records.
 
     Deliberately coarse. The interesting detail is in the before/after payload;
@@ -204,7 +222,7 @@ class AuditAction(str, Enum):
     NOTIFY = "notify"
 
 
-class EngagementType(str, Enum):
+class EngagementType(StrEnum):
     """What a CA firm was engaged to do for a client."""
 
     FULL_COMPLIANCE = "full_compliance"
@@ -214,13 +232,13 @@ class EngagementType(str, Enum):
     CUSTOM = "custom"
 
 
-class EngagementStatus(str, Enum):
+class EngagementStatus(StrEnum):
     ACTIVE = "active"
     PAUSED = "paused"
     TERMINATED = "terminated"
 
 
-class PlanTier(str, Enum):
+class PlanTier(StrEnum):
     """Pricing tiers of section 7.1."""
 
     SMB = "smb"

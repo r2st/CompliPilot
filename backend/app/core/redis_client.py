@@ -11,6 +11,7 @@ Keys follow section 2.3's convention: ``complipilot:{orgId}:{resource}:{id}``.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 from typing import Any
 
@@ -73,10 +74,11 @@ def reset_client() -> None:
     """
     global _client, _unavailable
     if _client is not None:
-        try:
+        # Closing a dead socket is not news, and this is called from the health
+        # check — a raise here would report Redis as the reason the API is
+        # unhealthy when the only failure was tidying up after it.
+        with contextlib.suppress(Exception):
             _client.close()
-        except Exception:  # noqa: BLE001 - closing a dead socket is not news
-            pass
     _client = None
     _unavailable = False
 

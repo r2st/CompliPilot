@@ -18,7 +18,6 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +27,7 @@ from app.models.mixins import (
     OrgScopedMixin,
     SoftDeleteMixin,
     TimestampMixin,
+    live_unique,
 )
 
 # Section 8(6) of the DPDP Act: the Data Protection Board must be told of a
@@ -91,13 +91,12 @@ class ConsentRecord(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         # A principal can hold at most one live consent per purpose per notice
         # version. A new version is a new row, which is what preserves the
         # history the Act asks the fiduciary to be able to produce.
-        UniqueConstraint(
+        live_unique(
+            "uq_consent_principal_purpose_version",
             "organization_id",
             "principal_fingerprint",
             "purpose",
             "notice_version",
-            "deleted_at",
-            name="uq_consent_principal_purpose_version",
         ),
         Index("ix_consent_org_principal", "organization_id", "principal_fingerprint"),
         Index("ix_consent_org_active", "organization_id", "is_granted"),
@@ -156,12 +155,8 @@ class DataMapEntry(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     notes: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
-        UniqueConstraint(
-            "organization_id",
-            "system_name",
-            "data_category",
-            "deleted_at",
-            name="uq_datamap_system_category",
+        live_unique(
+            "uq_datamap_system_category", "organization_id", "system_name", "data_category"
         ),
         Index("ix_datamap_org_sensitive", "organization_id", "is_sensitive"),
         Index("ix_data_map_entries_org_created", "organization_id", "created_at"),
@@ -220,9 +215,7 @@ class BreachIncident(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     metadata_json: Mapped[dict | None] = mapped_column(JSONType)
 
     __table_args__ = (
-        UniqueConstraint(
-            "organization_id", "reference", "deleted_at", name="uq_breach_org_reference"
-        ),
+        live_unique("uq_breach_org_reference", "organization_id", "reference"),
         Index("ix_breach_org_status", "organization_id", "status"),
         Index("ix_breach_org_detected", "organization_id", "detected_at"),
         Index("ix_breach_incidents_org_created", "organization_id", "created_at"),
@@ -275,7 +268,7 @@ class DataSubjectRequest(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     metadata_json: Mapped[dict | None] = mapped_column(JSONType)
 
     __table_args__ = (
-        UniqueConstraint("organization_id", "reference", "deleted_at", name="uq_dsr_org_ref"),
+        live_unique("uq_dsr_org_ref", "organization_id", "reference"),
         Index("ix_dsr_org_status_due", "organization_id", "status", "due_date"),
         Index("ix_data_subject_requests_org_created", "organization_id", "created_at"),
     )

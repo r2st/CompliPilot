@@ -11,7 +11,6 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,6 +21,7 @@ from app.models.mixins import (
     Paise,
     SoftDeleteMixin,
     TimestampMixin,
+    live_unique,
 )
 
 
@@ -126,9 +126,7 @@ class ComplianceObligation(Base, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (
         # Unique per owner: the system catalogue may hold one "gst.gstr3b" and
         # a firm may hold its own override under the same code.
-        UniqueConstraint(
-            "organization_id", "code", "deleted_at", name="uq_obligations_org_code"
-        ),
+        live_unique("uq_obligations_org_code", "organization_id", "code"),
         Index("ix_obligations_regulation_active", "regulation", "is_active"),
     )
 
@@ -189,9 +187,7 @@ class OrganizationObligation(Base, TimestampMixin, SoftDeleteMixin):
     obligation: Mapped[ComplianceObligation] = relationship()
 
     __table_args__ = (
-        UniqueConstraint(
-            "organization_id", "obligation_id", "deleted_at", name="uq_org_obligation"
-        ),
+        live_unique("uq_org_obligation", "organization_id", "obligation_id"),
         Index("ix_org_obligations_org_created", "organization_id", "created_at"),
     )
 

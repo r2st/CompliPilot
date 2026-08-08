@@ -11,13 +11,12 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.enums import UserRole
-from app.models.mixins import OrgScopedMixin, SoftDeleteMixin, TimestampMixin
+from app.models.mixins import OrgScopedMixin, SoftDeleteMixin, TimestampMixin, live_unique
 
 if TYPE_CHECKING:
     from app.models.organization import Organization
@@ -61,7 +60,7 @@ class User(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     failed_login_count: Mapped[int] = mapped_column(default=0, nullable=False)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    organization: Mapped["Organization"] = relationship(  # noqa: F821
+    organization: Mapped["Organization"] = relationship(  # noqa: F821,UP037
         back_populates="users"
     )
 
@@ -70,7 +69,7 @@ class User(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         # can legitimately hold an account at their firm and at a company they
         # are a director of. Scoped on ``deleted_at`` so a removed user's
         # address can be re-issued.
-        UniqueConstraint("organization_id", "email", "deleted_at", name="uq_users_org_email"),
+        live_unique("uq_users_org_email", "organization_id", "email"),
         Index("ix_users_org_created", "organization_id", "created_at"),
         Index("ix_users_org_role", "organization_id", "role"),
     )
@@ -118,7 +117,7 @@ class ClientAssignment(Base, TimestampMixin, SoftDeleteMixin):
     )
 
     __table_args__ = (
-        UniqueConstraint("user_id", "client_id", "deleted_at", name="uq_assignment_user_client"),
+        live_unique("uq_assignment_user_client", "user_id", "client_id"),
         Index("ix_client_assignments_user_org", "user_id", "client_org_id"),
     )
 

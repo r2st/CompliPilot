@@ -19,7 +19,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import ClassVar
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column
 from sqlalchemy.types import JSON
@@ -45,6 +45,37 @@ RUPEE = 100
 def utcnow() -> datetime:
     """Timezone-aware now, for defaults set in Python rather than by the DB."""
     return datetime.now(UTC)
+
+
+def live_unique(name: str, *columns: str) -> Index:
+    """A uniqueness rule that binds live rows only.
+
+    Use this, never ``UniqueConstraint(..., "deleted_at")``. The obvious
+    spelling of "unique among rows that are not deleted" is to add
+    ``deleted_at`` to a composite unique constraint, and it does not work: SQL
+    treats two NULLs as distinct, so every live row — all of which have
+    ``deleted_at IS NULL`` — is unique against every other live row and the
+    constraint fires only between two rows soft deleted at the identical
+    microsecond. Written that way, GSTIN uniqueness admitted duplicates and the
+    filing generator's idempotency guarantee held for nothing.
+
+    A partial unique index says it properly: unique across the named columns,
+    over the subset of rows where ``deleted_at IS NULL``. Postgres and SQLite
+    both support it, so the constraint the test suite exercises is the
+    constraint production has.
+
+    The predicate is spelled twice because SQLAlchemy takes it per dialect;
+    there is no portable spelling. ``Index`` rather than ``UniqueConstraint``
+    because only an index can carry a WHERE clause.
+    """
+    predicate = text("deleted_at IS NULL")
+    return Index(
+        name,
+        *columns,
+        unique=True,
+        postgresql_where=predicate,
+        sqlite_where=predicate,
+    )
 
 
 class TimestampMixin:

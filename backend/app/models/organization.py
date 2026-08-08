@@ -11,13 +11,12 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.enums import EntityType, OrgType, PlanTier
-from app.models.mixins import JSONType, Paise, SoftDeleteMixin, TimestampMixin
+from app.models.mixins import JSONType, Paise, SoftDeleteMixin, TimestampMixin, live_unique
 
 
 class Organization(Base, TimestampMixin, SoftDeleteMixin):
@@ -104,7 +103,7 @@ class Organization(Base, TimestampMixin, SoftDeleteMixin):
     # things the applicability engine reads — those get columns.
     metadata_json: Mapped[dict | None] = mapped_column(JSONType)
 
-    users: Mapped[list["User"]] = relationship(  # noqa: F821
+    users: Mapped[list["User"]] = relationship(  # noqa: F821,UP037
         back_populates="organization", cascade="all, delete-orphan"
     )
 
@@ -118,8 +117,8 @@ class Organization(Base, TimestampMixin, SoftDeleteMixin):
         # The uniqueness is on the fingerprint, not the ciphertext: the
         # ciphertext differs on every write because the nonce does, so a
         # constraint on it would never fire.
-        UniqueConstraint("gstin_fingerprint", "deleted_at", name="uq_organizations_gstin"),
-        UniqueConstraint("cin_fingerprint", "deleted_at", name="uq_organizations_cin"),
+        live_unique("uq_organizations_gstin", "gstin_fingerprint"),
+        live_unique("uq_organizations_cin", "cin_fingerprint"),
         Index("ix_organizations_type_active", "type", "is_active"),
     )
 
@@ -174,9 +173,7 @@ class Client(Base, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (
         # One live engagement per (firm, client) pair. Scoped on ``deleted_at``
         # for the same re-onboarding reason as above.
-        UniqueConstraint(
-            "ca_firm_id", "client_org_id", "deleted_at", name="uq_clients_firm_client"
-        ),
+        live_unique("uq_clients_firm_client", "ca_firm_id", "client_org_id"),
         Index("ix_clients_firm_status", "ca_firm_id", "status"),
     )
 

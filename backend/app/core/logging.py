@@ -17,9 +17,13 @@ from typing import Any
 from app.core.config import settings
 
 # Set by the middleware on the way in, and by the Celery hooks at task start.
-# The default is a plain dict so a log line emitted outside any request — at
-# import, or from a management command — formats rather than raising.
-request_ctx: ContextVar[dict[str, Any]] = ContextVar("request_ctx", default={})
+# The default is ``None`` rather than ``{}``: a mutable default on a ContextVar
+# is one object shared by every context that never called ``set()``, so a
+# caller who mutated it in place would leak fields into unrelated log lines.
+# :func:`_context_fields` turns the None back into an empty dict, so a log line
+# emitted outside any request — at import, or from a management command — still
+# formats rather than raising.
+request_ctx: ContextVar[dict[str, Any] | None] = ContextVar("request_ctx", default=None)
 
 # Attributes present on every LogRecord. Anything not in here was put on the
 # record by the caller with ``extra=`` and is worth emitting.

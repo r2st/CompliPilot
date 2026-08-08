@@ -51,7 +51,7 @@ class TokenResponse(BaseModel):
     # Swagger UI — match on.
     token_type: str = "bearer"
     expires_in: int
-    user: "UserResponse"
+    user: UserResponse
 
 
 class TotpChallengeResponse(BaseModel):
@@ -146,7 +146,7 @@ class SessionContextResponse(BaseModel):
     is_delegated: bool
     # Clients this user may switch into. Empty for a company user, and for a
     # CA firm's staff it is only what their assignments grant.
-    available_clients: list["ClientSummary"] = []
+    available_clients: list[ClientSummary] = []
 
 
 class ClientSummary(BaseModel):

@@ -11,7 +11,6 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -22,6 +21,7 @@ from app.models.mixins import (
     OrgScopedMixin,
     SoftDeleteMixin,
     TimestampMixin,
+    live_unique,
 )
 
 
@@ -124,9 +124,7 @@ class NotificationPreference(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMix
     quiet_hours_end: Mapped[int | None] = mapped_column()
 
     __table_args__ = (
-        UniqueConstraint(
-            "organization_id", "user_id", "deleted_at", name="uq_notif_pref_org_user"
-        ),
+        live_unique("uq_notif_pref_org_user", "organization_id", "user_id"),
         Index("ix_notification_preferences_org_created", "organization_id", "created_at"),
     )
 

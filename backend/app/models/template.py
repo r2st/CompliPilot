@@ -8,13 +8,12 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.models.enums import Regulation
-from app.models.mixins import JSONType, SoftDeleteMixin, TimestampMixin
+from app.models.mixins import JSONType, SoftDeleteMixin, TimestampMixin, live_unique
 
 
 class Template(Base, TimestampMixin, SoftDeleteMixin):
@@ -80,9 +79,7 @@ class Template(Base, TimestampMixin, SoftDeleteMixin):
         # One row per (owner, code, version). New versions are inserted, never
         # updated in place — an amended form is a different document, and a
         # filing drafted against version 2 must not silently become version 3.
-        UniqueConstraint(
-            "organization_id", "code", "version", "deleted_at", name="uq_templates_code_version"
-        ),
+        live_unique("uq_templates_code_version", "organization_id", "code", "version"),
         Index("ix_templates_lookup", "code", "is_active", "version"),
         Index("ix_templates_regulation_active", "regulation", "is_active"),
     )

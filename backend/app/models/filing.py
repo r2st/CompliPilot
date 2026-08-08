@@ -13,7 +13,6 @@ from sqlalchemy import (
     Index,
     String,
     Text,
-    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,6 +24,7 @@ from app.models.mixins import (
     Paise,
     SoftDeleteMixin,
     TimestampMixin,
+    live_unique,
 )
 
 if TYPE_CHECKING:
@@ -123,18 +123,17 @@ class Filing(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     notes: Mapped[str | None] = mapped_column(Text)
     metadata_json: Mapped[dict | None] = mapped_column(JSONType)
 
-    obligation: Mapped["ComplianceObligation"] = relationship()  # noqa: F821
+    obligation: Mapped["ComplianceObligation"] = relationship()  # noqa: F821,UP037
 
     __table_args__ = (
         # The generator is idempotent because of this: running the sweep twice
         # for July cannot produce two GSTR-3Bs. Scoped on ``deleted_at`` so a
         # filing voided in error can be recreated.
-        UniqueConstraint(
+        live_unique(
+            "uq_filings_org_obligation_period",
             "organization_id",
             "obligation_id",
             "period_key",
-            "deleted_at",
-            name="uq_filings_org_obligation_period",
         ),
         # The calendar's primary query: this org, ordered by due date, often
         # filtered by status.
@@ -212,7 +211,7 @@ class Deadline(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     __table_args__ = (
         # One deadline row per filing. The sweep would otherwise send a
         # duplicate reminder for every extra row.
-        UniqueConstraint("filing_id", "deleted_at", name="uq_deadlines_filing"),
+        live_unique("uq_deadlines_filing", "filing_id"),
         # The sweep's query: unsatisfied, due within the window. Leading with
         # ``is_satisfied`` keeps the scan off the (large, growing) history of
         # closed deadlines.
