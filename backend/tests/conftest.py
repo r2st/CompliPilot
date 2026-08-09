@@ -473,12 +473,20 @@ def make_update(
     regulation: Regulation = Regulation.GST,
     **kwargs,
 ) -> RegulatoryUpdate:
+    """A regulatory update, analysed and published.
+
+    Both flags default on because the feed serves only analysed, published
+    rows — an update the pipeline has ingested but not yet analysed has no
+    summary and no impact level. A fixture defaulting to the invisible state
+    would make every feed test start by fixing the fixture.
+    """
     update = RegulatoryUpdate(
         source=source,
         title=title,
         published_date=kwargs.pop("published_date", date(2026, 8, 1)),
         regulation=regulation,
         is_analysed=kwargs.pop("is_analysed", True),
+        is_published=kwargs.pop("is_published", True),
         **kwargs,
     )
     db.add(update)
