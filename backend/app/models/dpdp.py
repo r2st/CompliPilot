@@ -186,8 +186,12 @@ class BreachIncident(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     title: Mapped[str] = mapped_column(String(512), nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     severity: Mapped[str] = mapped_column(String(16), nullable=False, default="medium")
+    # "open" rather than "detected": the router writes "open" on every breach
+    # it creates and :class:`app.schemas.dpdp.BreachUpdateRequest` accepts only
+    # open/contained/notified/closed. A row defaulting outside that vocabulary
+    # is one the notify flow silently declines to advance.
     status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="detected", index=True
+        String(32), nullable=False, default="open", index=True
     )
 
     occurred_at: Mapped[datetime | None] = mapped_column(UTCDateTime)

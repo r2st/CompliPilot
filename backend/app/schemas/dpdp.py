@@ -16,6 +16,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, Field, model_validator
 
+from app.core.crypto import is_encrypted
 from app.schemas.common import ORMModel
 
 # The vocabulary the Act uses, constrained here rather than left free-text so
@@ -23,6 +24,26 @@ from app.schemas.common import ORMModel
 _LEGAL_BASES = r"^(consent|legitimate_use|legal_obligation|contract|vital_interest)$"
 _DSR_TYPES = r"^(access|correction|erasure|nomination|grievance|withdraw_consent)$"
 _SEVERITIES = r"^(low|medium|high|critical)$"
+
+
+def _never_emit_ciphertext(self):
+    """Blank ``principal_ref`` when it holds the stored ciphertext.
+
+    The column holds ``enc.v1:...``, so validating a row straight into a
+    response puts that blob into the field on *every* item of a list — useless
+    to the caller and the exact thing the module docstring forbids. Dropping it
+    here makes withholding the default: a single-record read assigns the
+    decrypted value after validating, and every other path gets ``None``
+    without having to remember to.
+
+    Keyed on the ciphertext marker rather than clearing unconditionally,
+    because the response model is validated twice — once here and again by
+    FastAPI on the way out — and an unconditional clear would discard the
+    plaintext a single-record read had deliberately set.
+    """
+    if is_encrypted(self.principal_ref):
+        self.principal_ref = None
+    return self
 
 
 class ConsentRecordResponse(ORMModel):
@@ -43,6 +64,8 @@ class ConsentRecordResponse(ORMModel):
 
     # Only populated on a single-record read. See the module docstring.
     principal_ref: str | None = None
+
+    _no_ciphertext = model_validator(mode="after")(_never_emit_ciphertext)
 
 
 class ConsentCreateRequest(BaseModel):
@@ -214,7 +237,10 @@ class DataSubjectRequestResponse(ORMModel):
 
     days_until_due: int | None = None
     is_overdue: bool | None = None
+    # Only populated on a single-record read, as on the consent register.
     principal_ref: str | None = None
+
+    _no_ciphertext = model_validator(mode="after")(_never_emit_ciphertext)
 
 
 class DataSubjectRequestCreate(BaseModel):

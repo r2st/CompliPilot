@@ -232,7 +232,10 @@ def withdraw_consent(
     )
     db.commit()
     db.refresh(consent)
-    return ConsentRecordResponse.model_validate(consent)
+
+    response = ConsentRecordResponse.model_validate(consent)
+    response.principal_ref = decrypt(consent.principal_ref)
+    return response
 
 
 # --------------------------------------------------------------------------
@@ -766,7 +769,10 @@ def update_data_request(
     )
     db.commit()
     db.refresh(dsr)
-    return _dsr_response(dsr, date.today())
+
+    response = _dsr_response(dsr, date.today())
+    response.principal_ref = decrypt(dsr.principal_ref)
+    return response
 
 
 # --------------------------------------------------------------------------

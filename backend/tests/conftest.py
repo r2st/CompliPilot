@@ -50,7 +50,7 @@ from sqlalchemy.orm import Session  # noqa: E402
 # whatever it was checking. ``app.models`` imports all of them; see its
 # docstring.
 import app.models  # noqa: E402,F401
-from app.core.crypto import fingerprint  # noqa: E402
+from app.core.crypto import encrypt, fingerprint  # noqa: E402
 from app.core.database import Base, SessionLocal, engine, get_db  # noqa: E402
 from app.core.security import create_access_token, hash_password  # noqa: E402
 from app.main import create_app  # noqa: E402
@@ -449,11 +449,19 @@ def make_dsr(
     due_date: date = date(2026, 9, 7),
     **kwargs,
 ) -> DataSubjectRequest:
+    """A data principal's request, with the identifier stored as the route
+    stores one.
+
+    ``principal_ref`` is encrypted rather than written in clear. The column
+    holds ciphertext everywhere in production, and a fixture that put the
+    plaintext there would let a test pass while the endpoint disclosed an
+    address it is supposed to withhold.
+    """
     request = DataSubjectRequest(
         organization_id=org.id,
         reference=kwargs.pop("reference", _next_ref("DSR")),
         request_type=request_type,
-        principal_ref=principal_ref,
+        principal_ref=encrypt(principal_ref) or "",
         principal_fingerprint=fingerprint(principal_ref) or "",
         status=status,
         received_at=kwargs.pop("received_at", utcnow()),
