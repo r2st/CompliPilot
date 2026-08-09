@@ -338,7 +338,7 @@ def _require_firm_member(db: Session, firm_id: int, user_id: int) -> User:
 
 def _get_engagement(db: Session, ctx: TenantContext, firm_id: int, client_id: int) -> Client:
     engagement = db.execute(
-        _visible_engagements(db, ctx, firm_id).where(Client.id == client_id)
+        _visible_engagements(ctx, firm_id).where(Client.id == client_id)
     ).scalar_one_or_none()
     if engagement is None:
         raise NotFoundError("No such client engagement")

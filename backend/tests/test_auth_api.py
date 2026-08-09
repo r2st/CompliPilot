@@ -746,7 +746,8 @@ class TestUserAdministration:
             },
         )
 
-        assert _login(app_client, "new.hire@acme.example.com", "a-long-enough-passphrase").status_code == 200
+        response = _login(app_client, "new.hire@acme.example.com", "a-long-enough-passphrase")
+        assert response.status_code == 200
 
     def test_staff_cannot_add_users(self, app_client, company_staff):
         response = app_client.post(
