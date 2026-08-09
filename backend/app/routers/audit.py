@@ -206,9 +206,8 @@ def export_csv(
         stmt = stmt.where(AuditTrail.timestamp <= datetime.combine(end_date, time.max))
     if entity_type:
         stmt = stmt.where(AuditTrail.entity_type == entity_type)
-    stmt = stmt.order_by(AuditTrail.sequence).limit(_MAX_EXPORT_ROWS)
 
-    audit_service.record_for(
+    own_entry, *_ = audit_service.record_for(
         db,
         ctx,
         action=AuditAction.EXPORT,
@@ -221,6 +220,15 @@ def export_csv(
         **audit_meta(request),  # type: ignore[arg-type]
     )
     db.commit()
+
+    # Bounded below this export's own entry. The rows are not read until the
+    # response streams, which is after the entry above has been committed — so
+    # without this the file ends with the record of its own creation, carrying
+    # a checksum the recipient has no way to have seen. Written first and
+    # excluded here, the export shows up in the *next* export instead, which is
+    # where a reader counting exports would look for it.
+    stmt = stmt.where(AuditTrail.sequence < own_entry.sequence)
+    stmt = stmt.order_by(AuditTrail.sequence).limit(_MAX_EXPORT_ROWS)
 
     columns = (
         "sequence",
