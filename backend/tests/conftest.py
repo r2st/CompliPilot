@@ -39,7 +39,7 @@ os.environ.update(
 )
 
 from collections.abc import Callable, Generator  # noqa: E402
-from datetime import date  # noqa: E402
+from datetime import date, datetime  # noqa: E402
 
 import pytest  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
@@ -54,19 +54,26 @@ from app.core.crypto import fingerprint  # noqa: E402
 from app.core.database import Base, SessionLocal, engine, get_db  # noqa: E402
 from app.core.security import create_access_token, hash_password  # noqa: E402
 from app.main import create_app  # noqa: E402
+from app.models.document import Document  # noqa: E402
+from app.models.dpdp import BreachIncident, DataSubjectRequest  # noqa: E402
 from app.models.enums import (  # noqa: E402
+    DocumentType,
     EngagementStatus,
     EngagementType,
     EntityType,
     FilingStatus,
     Frequency,
+    ImpactLevel,
     OrgType,
+    ParseStatus,
     Regulation,
     UserRole,
 )
 from app.models.filing import Deadline, Filing  # noqa: E402
+from app.models.mixins import utcnow  # noqa: E402
 from app.models.obligation import ComplianceObligation  # noqa: E402
 from app.models.organization import Client, Organization  # noqa: E402
+from app.models.regulatory import RegulatoryImpact, RegulatoryUpdate  # noqa: E402
 from app.models.user import ClientAssignment, User  # noqa: E402
 from app.services.filing_workflow import ensure_deadline  # noqa: E402
 
@@ -312,6 +319,141 @@ def make_deadline(db: Session, filing: Filing, **kwargs) -> Deadline:
         setattr(deadline, key, value)
     db.flush()
     return deadline
+
+
+_doc_counter = {"n": 0}
+_ref_counter = {"n": 0}
+
+
+def _next_ref(prefix: str) -> str:
+    _ref_counter["n"] += 1
+    return f"{prefix}-2026-{_ref_counter['n']:04d}"
+
+
+def make_document(
+    db: Session,
+    org: Organization,
+    *,
+    title: str = "GST show-cause notice",
+    type: DocumentType = DocumentType.SHOW_CAUSE_NOTICE,
+    parse_status: ParseStatus = ParseStatus.PENDING,
+    storage_path: str | None = None,
+    **kwargs,
+) -> Document:
+    """An uploaded document row, without the bytes.
+
+    ``storage_path`` is generated rather than defaulted to a constant: the
+    column is what the download route resolves, and two documents sharing a
+    path would let a test pass while the route returned the wrong file.
+    """
+    _doc_counter["n"] += 1
+    document = Document(
+        organization_id=org.id,
+        title=title,
+        type=type,
+        parse_status=parse_status,
+        storage_path=storage_path or f"docs/{org.id}/{_doc_counter['n']}.pdf",
+        **kwargs,
+    )
+    db.add(document)
+    db.flush()
+    return document
+
+
+def make_breach(
+    db: Session,
+    org: Organization,
+    *,
+    title: str = "Customer table exposed by a misconfigured backup",
+    detected_at: datetime | None = None,
+    severity: str = "high",
+    **kwargs,
+) -> BreachIncident:
+    """A DPDP breach incident.
+
+    ``detected_at`` defaults to *now*, which puts the 72-hour Board clock in
+    the future — the state a test has to move away from deliberately to
+    produce an overdue notification, rather than one it falls into by accident.
+    """
+    breach = BreachIncident(
+        organization_id=org.id,
+        reference=kwargs.pop("reference", _next_ref("BR")),
+        title=title,
+        severity=severity,
+        detected_at=detected_at or utcnow(),
+        **kwargs,
+    )
+    db.add(breach)
+    db.flush()
+    return breach
+
+
+def make_dsr(
+    db: Session,
+    org: Organization,
+    *,
+    request_type: str = "access",
+    principal_ref: str = "customer@example.com",
+    status: str = "received",
+    due_date: date = date(2026, 9, 7),
+    **kwargs,
+) -> DataSubjectRequest:
+    request = DataSubjectRequest(
+        organization_id=org.id,
+        reference=kwargs.pop("reference", _next_ref("DSR")),
+        request_type=request_type,
+        principal_ref=principal_ref,
+        principal_fingerprint=fingerprint(principal_ref) or "",
+        status=status,
+        received_at=kwargs.pop("received_at", utcnow()),
+        due_date=due_date,
+        **kwargs,
+    )
+    db.add(request)
+    db.flush()
+    return request
+
+
+def make_update(
+    db: Session,
+    *,
+    title: str = "Amendment to GST return filing",
+    source: str = "cbic",
+    regulation: Regulation = Regulation.GST,
+    **kwargs,
+) -> RegulatoryUpdate:
+    update = RegulatoryUpdate(
+        source=source,
+        title=title,
+        published_date=kwargs.pop("published_date", date(2026, 8, 1)),
+        regulation=regulation,
+        is_analysed=kwargs.pop("is_analysed", True),
+        **kwargs,
+    )
+    db.add(update)
+    db.flush()
+    return update
+
+
+def make_impact(
+    db: Session,
+    org: Organization,
+    update: RegulatoryUpdate | None = None,
+    *,
+    impact_level: ImpactLevel = ImpactLevel.HIGH,
+    is_acknowledged: bool = False,
+    **kwargs,
+) -> RegulatoryImpact:
+    impact = RegulatoryImpact(
+        organization_id=org.id,
+        update_id=(update or make_update(db)).id,
+        impact_level=impact_level,
+        is_acknowledged=is_acknowledged,
+        **kwargs,
+    )
+    db.add(impact)
+    db.flush()
+    return impact
 
 
 def token_for(user: User, *, client_org_id: int | None = None) -> str:
