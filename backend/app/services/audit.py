@@ -24,7 +24,7 @@ import hashlib
 import json
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import func, select
@@ -90,6 +90,26 @@ def _canonical(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str)
 
 
+def _canonical_timestamp(value: datetime) -> str:
+    """A single spelling of an instant, for hashing.
+
+    The checksum must depend on *when the thing happened*, not on how a driver
+    chose to render it. ``timestamp.isoformat()`` does not have that property:
+    what goes into the database as an aware UTC datetime comes back naive from
+    SQLite, and comes back from Postgres rendered in the session's timezone —
+    so the same row hashed to one value on write and a different one on
+    verification, and an untampered chain failed its own audit.
+
+    Normalising to UTC and fixing the precision makes the input depend on the
+    instant alone. A naive value is read as UTC because that is the only thing
+    this application ever stores; guessing local time would silently shift
+    every historical entry the first time a server's timezone changed.
+    """
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC).isoformat(timespec="microseconds")
+
+
 def compute_checksum(
     *,
     organization_id: int,
@@ -124,7 +144,7 @@ def compute_checksum(
         str(action),
         entity_type,
         entity_id or "",
-        timestamp.isoformat(),
+        _canonical_timestamp(timestamp),
         ip_address or "",
         _canonical(before) if before is not None else "",
         _canonical(after) if after is not None else "",

@@ -24,6 +24,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -51,7 +52,16 @@ class AuditTrail(Base):
 
     __tablename__ = "audit_trails"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    # BIGINT on Postgres: this is the highest-volume table in the schema and a
+    # 32-bit id is a foreseeable ceiling. The SQLite variant is deliberate and
+    # not a downgrade — SQLite only auto-assigns a rowid to a column declared
+    # exactly ``INTEGER PRIMARY KEY``, so a BIGINT primary key there inserts a
+    # NULL id and violates its own NOT NULL. SQLite's INTEGER is 64-bit anyway,
+    # so the variant costs no range; it only spells the same width in the
+    # dialect's own words.
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"), primary_key=True
+    )
 
     # Not OrgScopedMixin: that mixin brings a ``created_at`` composite index
     # this table has no ``created_at`` for, and the chain needs its own
