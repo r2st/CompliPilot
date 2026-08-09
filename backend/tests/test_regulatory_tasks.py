@@ -19,10 +19,30 @@ import pytest
 from app.models.enums import EntityType, ImpactLevel, OrgType, Regulation, UserRole
 from app.models.notification import Notification
 from app.models.regulatory import RegulatoryImpact, RegulatoryUpdate
+from app.services import llm
 from app.tasks import regulatory_tasks
 from tests.conftest import CRORE, make_org, make_user
 
 TODAY = date(2026, 8, 8)
+
+
+def _result(data: dict) -> llm.LLMResult:
+    """A completion as :func:`app.services.llm.complete_json` returns one."""
+    return llm.LLMResult(
+        content="{}", model="test-model", prompt_tokens=10, completion_tokens=5, data=data
+    )
+
+
+def _model_returns(monkeypatch, data: dict) -> None:
+    """Configure a model, and make it answer *data*.
+
+    The analyser is exercised here rather than the client: what the model says
+    is fixed so that the tests are about what the update row does with it.
+    ``llm.complete_json`` has its own tests, including the ones about a model
+    that returns prose where JSON was asked for.
+    """
+    monkeypatch.setattr(llm, "is_configured", lambda: True)
+    monkeypatch.setattr(llm, "complete_json", lambda *_a, **_k: _result(data))
 
 
 def make_update(
@@ -40,7 +60,7 @@ def make_update(
     update = RegulatoryUpdate(
         source=source,
         title=title,
-        published_date=TODAY,
+        published_date=kwargs.pop("published_date", TODAY),
         impact_level=impact_level,
         regulation=kwargs.pop("regulation", Regulation.GST),
         affected_entity_types_json=entity_types,
@@ -325,6 +345,319 @@ class TestAnalysisWithoutAKey:
         assert not stored
         assert update.is_analysed
         assert (update.analysis_json or {}).get("_skipped")
+
+
+class TestAnalysisWithAModel:
+    """What a returned analysis is allowed to change on the update.
+
+    The model's job here is narrow: read a circular and say who it binds and
+    by when. Everything it returns lands on a row that then drives a fan-out to
+    every tenant, so the fields it may write, and the ones it may not, matter
+    more than the wording of any of them.
+    """
+
+    def test_the_analysis_is_stored_with_its_provenance(self, db, monkeypatch):
+        """An impact assessment is the kind of thing a client asks about six
+        months later. "Which model said this, on how many tokens" has to be
+        answerable from the row rather than from a log that has rotated."""
+        update = make_update(db, is_analysed=False, summary=None)
+        _model_returns(
+            monkeypatch,
+            {
+                "summary": "The GSTR-3B due date moves to the 22nd.",
+                "impact_level": "high",
+                "regulation": "gst",
+                "action_required": "File by the 22nd from September.",
+            },
+        )
+
+        assert regulatory_tasks.analyse_update(db, update) is True
+
+        assert update.summary == "The GSTR-3B due date moves to the 22nd."
+        assert update.impact_level == ImpactLevel.HIGH
+        assert update.action_required == "File by the 22nd from September."
+        assert (update.analysis_json or {})["_model"] == "test-model"
+        assert (update.analysis_json or {})["_tokens"] == 15
+
+    def test_it_is_marked_analysed_so_the_sweep_moves_on(self, db, monkeypatch):
+        update = make_update(db, is_analysed=False)
+        _model_returns(monkeypatch, {"summary": "Something changed."})
+
+        regulatory_tasks.analyse_update(db, update)
+
+        assert update.is_analysed is True
+        assert update.analysed_at is not None
+
+    def test_the_audience_filters_are_lowercased(self, db, monkeypatch):
+        """The matcher compares against lowercase profile values, so a model
+        answering "Karnataka" must not produce an update that matches nobody —
+        a filter that silently matches no one is indistinguishable from a
+        circular that affects no one."""
+        update = make_update(db, is_analysed=False)
+        _model_returns(
+            monkeypatch,
+            {
+                "summary": "State-specific amendment.",
+                "affected_entity_types": ["Private_Limited"],
+                "affected_states": ["Karnataka", " Kerala "],
+                "affected_forms": ["GSTR-3B"],
+            },
+        )
+
+        regulatory_tasks.analyse_update(db, update)
+
+        assert update.affected_entity_types_json == ["private_limited"]
+        assert update.affected_states_json == ["karnataka", "kerala"]
+        assert update.affected_obligation_codes_json == ["gstr-3b"]
+
+    @pytest.mark.parametrize("raw", [None, "not a list", 42, {"a": 1}])
+    def test_a_malformed_audience_filter_becomes_no_filter(self, db, monkeypatch, raw):
+        """Not a crash, and not a filter matching the string it was handed.
+
+        An empty list is read downstream as "affects everyone", which is the
+        safe reading: over-reporting one circular is recoverable, and a
+        malformed field silently narrowing the audience to nobody is not.
+        """
+        update = make_update(db, is_analysed=False)
+        _model_returns(
+            monkeypatch, {"summary": "Something changed.", "affected_states": raw}
+        )
+
+        regulatory_tasks.analyse_update(db, update)
+
+        assert update.affected_states_json == []
+
+    def test_an_unusable_severity_falls_back_to_medium(self, db, monkeypatch):
+        update = make_update(db, is_analysed=False)
+        _model_returns(
+            monkeypatch, {"summary": "Something changed.", "impact_level": "apocalyptic"}
+        )
+
+        regulatory_tasks.analyse_update(db, update)
+
+        assert update.impact_level == ImpactLevel.MEDIUM
+
+    def test_an_unusable_regulation_leaves_the_ingested_one_alone(self, db, monkeypatch):
+        """The ingester knew which feed it read this from. A model that cannot
+        name the regulation is less informed than the source, not more."""
+        update = make_update(db, is_analysed=False, regulation=Regulation.GST)
+        _model_returns(
+            monkeypatch, {"summary": "Something changed.", "regulation": "cryptocurrency"}
+        )
+
+        regulatory_tasks.analyse_update(db, update)
+
+        assert update.regulation == Regulation.GST
+
+    def test_an_empty_summary_does_not_erase_the_one_already_there(
+        self, db, monkeypatch
+    ):
+        """The feed's own abstract is better than nothing on a client's alert
+        list."""
+        update = make_update(db, is_analysed=False, summary="From the feed.")
+        _model_returns(monkeypatch, {"summary": ""})
+
+        regulatory_tasks.analyse_update(db, update)
+
+        assert update.summary == "From the feed."
+
+    def test_a_hallucinated_deadline_is_dropped(self, db, monkeypatch):
+        """It would land on a compliance calendar. Anything that is not an
+        unambiguous ISO date is discarded rather than coerced."""
+        update = make_update(db, is_analysed=False)
+        _model_returns(
+            monkeypatch,
+            {"summary": "Something changed.", "compliance_deadline": "end of next quarter"},
+        )
+
+        regulatory_tasks.analyse_update(db, update)
+
+        assert update.compliance_deadline is None
+
+    def test_an_iso_deadline_is_kept(self, db, monkeypatch):
+        update = make_update(db, is_analysed=False)
+        _model_returns(
+            monkeypatch,
+            {"summary": "Something changed.", "compliance_deadline": "2026-09-30"},
+        )
+
+        regulatory_tasks.analyse_update(db, update)
+
+        assert update.compliance_deadline == date(2026, 9, 30)
+
+
+class TestTheAnalysisSweep:
+    """``analyse_pending_updates`` — twice daily, unattended.
+
+    It analyses a batch and then fans each one out to tenants. The failure
+    handling is the whole point of the loop: an update the model could not
+    read must stay unanalysed so the next run retries it, and a crash on one
+    circular must not cost the rest of the batch.
+    """
+
+    def test_it_analyses_and_fans_out(self, db, company, monkeypatch):
+        make_update(db, is_analysed=False)
+        db.commit()
+        _model_returns(monkeypatch, {"summary": "The due date moved.", "impact_level": "high"})
+
+        result = regulatory_tasks.analyse_pending_updates()
+
+        assert result["analysed"] == 1
+        assert result["impacts"] == 1
+        db.expire_all()
+        assert db.query(RegulatoryImpact).count() == 1
+
+    def test_an_already_analysed_update_is_not_reanalysed(self, db, monkeypatch):
+        """Every re-analysis is a paid model call over a document whose content
+        has not changed."""
+        make_update(db, is_analysed=True)
+        db.commit()
+        _model_returns(monkeypatch, {"summary": "Should not be called."})
+
+        assert regulatory_tasks.analyse_pending_updates()["analysed"] == 0
+
+    def test_a_soft_deleted_update_is_skipped(self, db, monkeypatch):
+        update = make_update(db, is_analysed=False)
+        update.soft_delete()
+        db.commit()
+        _model_returns(monkeypatch, {"summary": "Should not be called."})
+
+        assert regulatory_tasks.analyse_pending_updates()["analysed"] == 0
+
+    def test_the_batch_is_bounded(self, db, monkeypatch):
+        for n in range(3):
+            make_update(db, title=f"Circular {n}", is_analysed=False)
+        db.commit()
+        _model_returns(monkeypatch, {"summary": "Something changed."})
+
+        assert regulatory_tasks.analyse_pending_updates(limit=2)["analysed"] == 2
+
+    def test_the_newest_circular_is_analysed_first(self, db, monkeypatch):
+        """A batch that cannot cover the backlog should spend itself on what
+        people are asking about today."""
+        old = make_update(db, title="Old", is_analysed=False, published_date=date(2026, 1, 1))
+        new = make_update(db, title="New", is_analysed=False, published_date=date(2026, 8, 1))
+        db.commit()
+        _model_returns(monkeypatch, {"summary": "Something changed."})
+
+        regulatory_tasks.analyse_pending_updates(limit=1)
+
+        db.expire_all()
+        assert db.get(RegulatoryUpdate, new.id).is_analysed is True
+        assert db.get(RegulatoryUpdate, old.id).is_analysed is False
+
+    def test_an_upstream_failure_leaves_the_update_for_the_next_run(
+        self, db, monkeypatch
+    ):
+        """Marking it analysed with no analysis would bury the circular
+        permanently — it would never appear in a backlog and never be mapped
+        to anyone."""
+        update = make_update(db, is_analysed=False)
+        db.commit()
+        monkeypatch.setattr(llm, "is_configured", lambda: True)
+
+        def _down(*_a, **_k):
+            raise llm.UpstreamError("502 from the provider")
+
+        monkeypatch.setattr(llm, "complete_json", _down)
+
+        result = regulatory_tasks.analyse_pending_updates()
+
+        assert result["analysed"] == 0
+        db.expire_all()
+        assert db.get(RegulatoryUpdate, update.id).is_analysed is False
+
+    def test_a_crash_on_one_circular_does_not_cost_the_batch(self, db, monkeypatch):
+        doomed = make_update(db, title="Doomed", is_analysed=False)
+        survivor = make_update(db, title="Survivor", is_analysed=False)
+        db.commit()
+        monkeypatch.setattr(llm, "is_configured", lambda: True)
+
+        def _boom_on_doomed(prompt, **_k):
+            if "Doomed" in prompt:
+                raise RuntimeError("the analyser segfaulted")
+            return _result({"summary": "Something changed."})
+
+        monkeypatch.setattr(llm, "complete_json", _boom_on_doomed)
+
+        result = regulatory_tasks.analyse_pending_updates()
+
+        assert result["analysed"] == 1
+        db.expire_all()
+        assert db.get(RegulatoryUpdate, survivor.id).is_analysed is True
+        assert db.get(RegulatoryUpdate, doomed.id).is_analysed is False
+
+    def test_an_empty_backlog_is_not_an_error(self, db):
+        assert regulatory_tasks.analyse_pending_updates() == {"analysed": 0, "impacts": 0}
+
+
+class TestRemapUpdate:
+    """The manual handle, for after an analysis is corrected by hand."""
+
+    def test_it_fans_the_update_out_again(self, db, company):
+        update = make_update(db)
+        db.commit()
+
+        result = regulatory_tasks.remap_update(update.id)
+
+        assert result["matched"] == 1
+        db.expire_all()
+        assert db.query(RegulatoryImpact).count() == 1
+
+    def test_a_corrected_analysis_reaches_the_tenants_it_now_matches(self, db, company):
+        """The reason it exists. An officer widens an audience filter that was
+        wrong, and the clients it should have reached get their alert without
+        waiting for a re-ingest."""
+        update = make_update(db, entity_types=["llp"])
+        db.commit()
+        regulatory_tasks.remap_update(update.id)
+        assert db.query(RegulatoryImpact).count() == 0
+
+        update.affected_entity_types_json = ["private_limited"]
+        db.commit()
+
+        assert regulatory_tasks.remap_update(update.id)["matched"] == 1
+
+    def test_a_missing_update_is_reported_not_raised(self, db):
+        assert regulatory_tasks.remap_update(9999) == {"update_id": 9999, "found": False}
+
+    def test_one_broken_tenant_does_not_stop_the_fan_out(
+        self, db, company, other_company, monkeypatch
+    ):
+        """A circular reaches four hundred clients or it reaches none.
+
+        The fan-out commits per organization for exactly this reason: one
+        tenant whose profile makes the assessment blow up costs that tenant
+        their alert, not everybody else's.
+        """
+        update = make_update(db)
+        db.commit()
+        real = regulatory_tasks.assess_impact
+
+        def _explode_on_first(session, org, upd):
+            if org.id == company.id:
+                raise RuntimeError("malformed profile")
+            return real(session, org, upd)
+
+        monkeypatch.setattr(regulatory_tasks, "assess_impact", _explode_on_first)
+
+        result = regulatory_tasks.remap_update(update.id)
+
+        assert result["matched"] == 1
+        db.expire_all()
+        assert db.query(RegulatoryImpact).filter_by(organization_id=company.id).count() == 0
+        assert (
+            db.query(RegulatoryImpact).filter_by(organization_id=other_company.id).count()
+            == 1
+        )
+
+    def test_a_soft_deleted_update_is_not_remapped(self, db, company):
+        update = make_update(db)
+        update.soft_delete()
+        db.commit()
+
+        assert regulatory_tasks.remap_update(update.id)["found"] is False
+        assert db.query(RegulatoryImpact).count() == 0
 
 
 class TestAnalysisCoercion:
