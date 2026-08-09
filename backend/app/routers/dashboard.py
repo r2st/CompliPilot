@@ -183,7 +183,7 @@ def _filing_card(filing: Filing, obligation: ComplianceObligation | None, today:
         "regulation": str(filing.regulation),
         "period_key": filing.period_key,
         "due_date": filing.effective_due_date.isoformat(),
-        "days_until_due": filing.days_until_due(today),
+        "days_until_due": filing.days_until(today),
         "status": str(filing.status),
         "penalty_per_day_paise": obligation.penalty_per_day_paise if obligation else None,
     }

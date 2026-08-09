@@ -60,7 +60,7 @@ _AUDITED = (
 def _summary(filing: Filing, obligation: ComplianceObligation | None, today: date) -> FilingSummary:
     response = FilingSummary.model_validate(filing)
     response.effective_due_date = filing.effective_due_date
-    response.days_until_due = filing.days_until_due(today)
+    response.days_until_due = filing.days_until(today)
     response.urgency = urgency(response.days_until_due)
     response.is_open = filing.is_open
     if obligation is not None:
@@ -71,7 +71,7 @@ def _summary(filing: Filing, obligation: ComplianceObligation | None, today: dat
 def _detail(filing: Filing, obligation: ComplianceObligation | None, today: date) -> FilingResponse:
     response = FilingResponse.model_validate(filing)
     response.effective_due_date = filing.effective_due_date
-    response.days_until_due = filing.days_until_due(today)
+    response.days_until_due = filing.days_until(today)
     response.urgency = urgency(response.days_until_due)
     response.is_open = filing.is_open
     response.allowed_transitions = filing_workflow.allowed_from(filing.status)

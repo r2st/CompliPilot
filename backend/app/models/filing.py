@@ -161,8 +161,17 @@ class Filing(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
             FilingStatus.NOT_APPLICABLE,
         )
 
-    def days_until_due(self, today: date | None = None) -> int:
-        """Days from *today* to the effective due date; negative once overdue."""
+    def days_until(self, today: date | None = None) -> int:
+        """Days from *today* to the effective due date; negative once overdue.
+
+        Deliberately *not* named ``days_until_due``. The response schemas carry
+        a ``days_until_due`` field, and ``model_validate(filing)`` reads
+        attributes by name — a method of the same name is picked up as a bound
+        method and fails validation, which turned every filing list and detail
+        response into a 500. ``effective_due_date`` and ``is_open`` may share
+        their names because they are properties and evaluate to the right type;
+        this one takes an argument and cannot.
+        """
         reference = today or date.today()
         return (self.effective_due_date - reference).days
 
