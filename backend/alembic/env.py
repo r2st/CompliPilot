@@ -8,9 +8,9 @@ from __future__ import annotations
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from alembic import context
 from app.core.config import settings
 from app.core.database import Base
 
@@ -33,9 +33,7 @@ def _include_object(obj, name, type_, reflected, compare_to) -> bool:
     ``alembic_version`` is alembic's own bookkeeping table; comparing it
     against the model metadata proposes dropping it on every run.
     """
-    if type_ == "table" and name == "alembic_version":
-        return False
-    return True
+    return not (type_ == "table" and name == "alembic_version")
 
 
 def run_migrations_offline() -> None:
