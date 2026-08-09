@@ -74,6 +74,7 @@ from app.models.mixins import utcnow  # noqa: E402
 from app.models.obligation import ComplianceObligation  # noqa: E402
 from app.models.organization import Client, Organization  # noqa: E402
 from app.models.regulatory import RegulatoryImpact, RegulatoryUpdate  # noqa: E402
+from app.models.template import Template  # noqa: E402
 from app.models.user import ClientAssignment, User  # noqa: E402
 from app.services.filing_workflow import ensure_deadline  # noqa: E402
 
@@ -358,6 +359,56 @@ def make_document(
     db.add(document)
     db.flush()
     return document
+
+
+_template_counter = {"n": 0}
+
+
+def make_template(
+    db: Session,
+    *,
+    code: str | None = None,
+    name: str = "Monthly GST return",
+    category: str = "filing",
+    organization_id: int | None = None,
+    version: int = 1,
+    is_active: bool = True,
+    template_json: dict | None = None,
+    body_template: str | None = None,
+    **kwargs,
+) -> Template:
+    """A template library row.
+
+    ``organization_id`` defaults to None, which is what makes it a *system*
+    template — shared with every tenant and writable by none. ``is_system`` is
+    derived from it rather than passed separately, because the two disagreeing
+    is a state the seeder cannot produce and a test should not invent.
+
+    The payload defaults follow the category the way the create schema requires
+    it: a ``filing`` template gets a field schema, a ``document`` template gets
+    a body. A row with neither cannot produce anything.
+    """
+    _template_counter["n"] += 1
+    if template_json is None and category == "filing":
+        template_json = {"fields": [{"key": "turnover", "label": "Turnover", "type": "money"}]}
+    if body_template is None and category == "document":
+        body_template = "Resolution passed by {company_name} on {meeting_date}."
+
+    template = Template(
+        organization_id=organization_id,
+        is_system=organization_id is None,
+        code=code or f"test.template.{_template_counter['n']}",
+        name=name,
+        category=category,
+        version=version,
+        is_active=is_active,
+        template_json=template_json,
+        body_template=body_template,
+        **kwargs,
+    )
+    db.add(template)
+    db.flush()
+    return template
 
 
 def make_breach(

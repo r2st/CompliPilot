@@ -334,6 +334,11 @@ def delete_obligation(
         raise NotFoundError("No such obligation")
     deny_system_row(obligation, label="obligation")
 
+    # Snapshot before the mutation. Taken afterwards it would record
+    # ``is_active: False`` as the prior state, describing a row that was
+    # already retired rather than the retirement being recorded.
+    before = snapshot(obligation, _AUDITED)
+
     obligation.is_active = False
     obligation.soft_delete()
     for link in db.execute(
@@ -351,7 +356,7 @@ def delete_obligation(
         action=AuditAction.SOFT_DELETE,
         entity_type="compliance_obligation",
         entity_id=obligation.id,
-        before=snapshot(obligation, _AUDITED),
+        before=before,
         summary=f"Obligation {obligation.code} retired",
     )
     db.commit()

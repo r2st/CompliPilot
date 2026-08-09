@@ -124,9 +124,22 @@ def list_templates(
     )
 
 
-def _get_template(db: Session, ctx: TenantContext, template_id: int) -> Template:
+def _get_template(
+    db: Session, ctx: TenantContext, template_id: int, *, include_retired: bool = False
+) -> Template:
+    """One template by id, in this tenant's view of the library, or a 404.
+
+    ``include_retired`` is what makes reopening an old filing work. A filing
+    keeps a pointer to the row it was drafted against, and retiring a template
+    only soft deletes it — so the read paths resolve retired rows and the write
+    paths do not. Without the split, retiring a template would break every
+    filing ever drafted against it, which is the opposite of what soft deleting
+    it was for.
+    """
     template = db.execute(
-        catalogue_scoped(Template, ctx).where(Template.id == template_id)
+        catalogue_scoped(Template, ctx, include_deleted=include_retired).where(
+            Template.id == template_id
+        )
     ).scalar_one_or_none()
     if template is None:
         raise NotFoundError("No such template")
@@ -169,7 +182,9 @@ def get_template(
     ctx: TenantContext = Depends(get_tenant_context),
     db: Session = Depends(get_db),
 ):
-    return TemplateResponse.model_validate(_get_template(db, ctx, template_id))
+    return TemplateResponse.model_validate(
+        _get_template(db, ctx, template_id, include_retired=True)
+    )
 
 
 @router.post(
@@ -337,7 +352,7 @@ def render_template(
     Only for ``document`` templates — a filing template's ``template_json`` is
     a field schema for the editor, not a body, and there is nothing to render.
     """
-    template = _get_template(db, ctx, template_id)
+    template = _get_template(db, ctx, template_id, include_retired=True)
     if not template.body_template:
         raise ValidationError(
             "This template has no body to render; it is a "
@@ -362,7 +377,7 @@ def template_placeholders(
     db: Session = Depends(get_db),
 ):
     """The placeholder names, so the UI can build the form before rendering."""
-    template = _get_template(db, ctx, template_id)
+    template = _get_template(db, ctx, template_id, include_retired=True)
     return placeholders(template.body_template or "")
 
 
@@ -384,6 +399,12 @@ def delete_template(
     template = _get_template(db, ctx, template_id)
     deny_system_row(template, label="template")
 
+    # Snapshot before the mutation, not after. Taken afterwards it records
+    # ``is_active: False`` as the *prior* state, so the entry describes a row
+    # that was already retired rather than the retirement that happened — and
+    # an audit trail is only evidence if it says what changed.
+    before = snapshot(template, _AUDITED)
+
     template.is_active = False
     template.soft_delete()
     record(
@@ -393,7 +414,7 @@ def delete_template(
         action=AuditAction.SOFT_DELETE,
         entity_type="template",
         entity_id=template.id,
-        before=snapshot(template, _AUDITED),
+        before=before,
         summary=f"Template {template.code} v{template.version} retired",
     )
     db.commit()
