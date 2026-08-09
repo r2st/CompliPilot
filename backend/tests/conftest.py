@@ -58,11 +58,17 @@ from app.models.enums import (  # noqa: E402
     EngagementStatus,
     EngagementType,
     EntityType,
+    FilingStatus,
+    Frequency,
     OrgType,
+    Regulation,
     UserRole,
 )
+from app.models.filing import Deadline, Filing  # noqa: E402
+from app.models.obligation import ComplianceObligation  # noqa: E402
 from app.models.organization import Client, Organization  # noqa: E402
 from app.models.user import ClientAssignment, User  # noqa: E402
+from app.services.filing_workflow import ensure_deadline  # noqa: E402
 
 API = "/api/v1"
 
@@ -224,6 +230,81 @@ def make_assignment(
     db.add(assignment)
     db.flush()
     return assignment
+
+
+_code_counter = {"n": 0}
+
+
+def make_obligation(
+    db: Session,
+    *,
+    code: str | None = None,
+    regulation: Regulation = Regulation.GST,
+    filing_type: str | None = "GSTR-3B",
+    frequency: Frequency = Frequency.MONTHLY,
+    due_day: int | None = 20,
+    organization_id: int | None = None,
+    **kwargs,
+) -> ComplianceObligation:
+    """A catalogue obligation.
+
+    ``organization_id`` defaults to None, which is what makes it a *system*
+    obligation — the shape almost every test wants, since the catalogue is
+    shared and only a tenant's own custom obligations carry an owner.
+    """
+    _code_counter["n"] += 1
+    obligation = ComplianceObligation(
+        organization_id=organization_id,
+        regulation=regulation,
+        code=code or f"test.obligation.{_code_counter['n']}",
+        title=kwargs.pop("title", "Monthly GST return"),
+        filing_type=filing_type,
+        frequency=frequency,
+        due_day=due_day,
+        **kwargs,
+    )
+    db.add(obligation)
+    db.flush()
+    return obligation
+
+
+def make_filing(
+    db: Session,
+    org: Organization,
+    obligation: ComplianceObligation,
+    *,
+    period_key: str = "2026-07",
+    due_date: date = date(2026, 8, 20),
+    status: FilingStatus = FilingStatus.NOT_STARTED,
+    **kwargs,
+) -> Filing:
+    filing = Filing(
+        organization_id=org.id,
+        obligation_id=obligation.id,
+        regulation=obligation.regulation,
+        filing_type=obligation.filing_type,
+        period_key=period_key,
+        due_date=due_date,
+        status=status,
+        **kwargs,
+    )
+    db.add(filing)
+    db.flush()
+    return filing
+
+
+def make_deadline(db: Session, filing: Filing, **kwargs) -> Deadline:
+    """The reminder-state row for a filing.
+
+    Goes through ``ensure_deadline`` so a test's deadline is built exactly the
+    way the generator builds one, rather than by a second construction path
+    that could drift from it.
+    """
+    deadline = ensure_deadline(db, filing)
+    for key, value in kwargs.items():
+        setattr(deadline, key, value)
+    db.flush()
+    return deadline
 
 
 def token_for(user: User, *, client_org_id: int | None = None) -> str:
