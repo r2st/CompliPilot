@@ -8,14 +8,36 @@ an assertion that running the same sweep again does nothing.
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
+
+import pytest
 
 from app.models.enums import FilingStatus, NotificationStatus, UserRole
-from app.models.notification import Notification
+from app.models.notification import Notification, NotificationPreference
+from app.services.notifications import IST
 from app.tasks import deadline_tasks
 from tests.conftest import make_deadline, make_filing, make_obligation, make_user
 
 TODAY = date(2026, 8, 8)
+
+
+def at_ist(hour: int) -> datetime:
+    """*hour* o'clock on TODAY, in IST.
+
+    Quiet hours are the one part of these tasks that depends on the time and
+    not only the date, so the tests that touch them hand the sweep an instant
+    instead of letting it read the clock.
+    """
+    return datetime(TODAY.year, TODAY.month, TODAY.day, hour, tzinfo=IST)
+
+
+def _quiet(db, org, *, start: int, end: int) -> NotificationPreference:
+    pref = NotificationPreference(
+        organization_id=org.id, quiet_hours_start=start, quiet_hours_end=end
+    )
+    db.add(pref)
+    db.flush()
+    return pref
 
 
 def _notifications(db, org, *, kind=None):
@@ -106,22 +128,88 @@ class TestReminderSweep:
 
         assert deadline_tasks._sweep_org_reminders(db, company, today=TODAY)["sent"] == 0
 
-    def test_quiet_hours_suppress_the_whole_sweep(
-        self, db, company, company_admin, monkeypatch
-    ):
-        from app.models.notification import NotificationPreference
+    def test_quiet_hours_suppress_the_whole_sweep(self, db, company, company_admin):
+        """Nothing goes out at 2am, and the sweep says why.
 
-        db.add(
-            NotificationPreference(
-                organization_id=company.id, quiet_hours_start=0, quiet_hours_end=23
-            )
-        )
+        The hour is passed in rather than left to the wall clock. A sweep test
+        that reads the real time passes on 23 runs out of 24 and fails on the
+        one at the edge of the window, which is a test that reports a bug the
+        day nobody is looking at CI.
+        """
+        _quiet(db, company, start=22, end=7)
         _arrange(db, company, due_in_days=7)
         db.flush()
 
-        result = deadline_tasks._sweep_org_reminders(db, company, today=TODAY)
+        result = deadline_tasks._sweep_org_reminders(
+            db, company, today=TODAY, now=at_ist(2)
+        )
+
         assert result["skipped_quiet_hours"]
         assert _notifications(db, company) == []
+
+    def test_outside_the_window_the_sweep_runs(self, db, company, company_admin):
+        """The other half of the same setting.
+
+        Without this, quiet hours that had been misread as "always" would look
+        correct: the suppression test would pass and no reminder would ever be
+        sent.
+        """
+        _quiet(db, company, start=22, end=7)
+        _arrange(db, company, due_in_days=7)
+        db.flush()
+
+        result = deadline_tasks._sweep_org_reminders(
+            db, company, today=TODAY, now=at_ist(11)
+        )
+
+        assert result["sent"] == 1
+        assert "skipped_quiet_hours" not in result
+
+    @pytest.mark.parametrize(
+        ("hour", "quiet"),
+        [(21, False), (22, True), (6, True), (7, False)],
+        ids=["the hour before", "the first hour", "the last hour", "the hour after"],
+    )
+    def test_the_window_is_half_open_at_both_ends(
+        self, db, company, company_admin, hour, quiet
+    ):
+        """A 22–7 window is nine hours, not eight or ten.
+
+        The wrapping comparison is the easiest thing in this module to get off
+        by one, and either error is invisible in production: an hour too few
+        wakes somebody at 6am, an hour too many silently holds a reminder that
+        was due at 7.
+        """
+        _quiet(db, company, start=22, end=7)
+        _arrange(db, company, due_in_days=7)
+        db.flush()
+
+        result = deadline_tasks._sweep_org_reminders(
+            db, company, today=TODAY, now=at_ist(hour)
+        )
+
+        assert result.get("skipped_quiet_hours", False) is quiet
+
+    def test_a_suppressed_reminder_is_sent_by_the_next_sweep(
+        self, db, company, company_admin
+    ):
+        """Quiet hours defer, they do not cancel.
+
+        The offset must not be marked sent on the way past — a reminder
+        swallowed because the sweep happened to land at 3am is one nobody ever
+        finds out about.
+        """
+        _quiet(db, company, start=22, end=7)
+        _, deadline = _arrange(db, company, due_in_days=7)
+        db.flush()
+
+        deadline_tasks._sweep_org_reminders(db, company, today=TODAY, now=at_ist(3))
+        assert deadline.reminders_sent == []
+
+        result = deadline_tasks._sweep_org_reminders(
+            db, company, today=TODAY, now=at_ist(9)
+        )
+        assert result["sent"] == 1
 
     def test_an_offset_is_recorded_even_with_no_recipients(self, db, company):
         """An org with nobody configured must not replay its whole schedule
@@ -365,11 +453,11 @@ class TestTaskEntryPoints:
         original = deadline_tasks._sweep_org_reminders
         seen: list[int] = []
 
-        def _explode_on_first(session, org, *, today):
+        def _explode_on_first(session, org, **kwargs):
             seen.append(org.id)
             if org.id == company.id:
                 raise RuntimeError("malformed profile")
-            return original(session, org, today=today)
+            return original(session, org, **kwargs)
 
         monkeypatch.setattr(deadline_tasks, "_sweep_org_reminders", _explode_on_first)
 

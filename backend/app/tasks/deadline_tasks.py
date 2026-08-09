@@ -16,7 +16,7 @@ that runs twice in an hour finds its work already recorded and does nothing.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -124,15 +124,22 @@ def _notify(
     return len(recipients)
 
 
-def _sweep_org_reminders(db: Session, org: Organization, *, today: date) -> dict:
+def _sweep_org_reminders(
+    db: Session, org: Organization, *, today: date, now: datetime | None = None
+) -> dict:
     """Send every reminder due for one organization.
 
     Quiet hours are checked once per organization rather than per deadline: the
     answer cannot differ between two filings in the same sweep, and asking per
     filing would be a preference lookup per row.
+
+    *now* is the instant *today* was derived from. Letting the quiet-hours check
+    read the clock for itself instead would mean a sweep that begins at 23:59:59
+    IST compares deadlines against yesterday's date and quiet hours against
+    tomorrow's first hour.
     """
     pref = notifications.preferences_for(db, org.id)
-    if notifications.in_quiet_hours(pref):
+    if notifications.in_quiet_hours(pref, now=now):
         return {"organization_id": org.id, "skipped_quiet_hours": True, "sent": 0}
 
     offsets = notifications.reminder_offsets_for(db, org.id)
@@ -183,13 +190,14 @@ def _sweep_org_reminders(db: Session, org: Organization, *, today: date) -> dict
 @celery_app.task(name="app.tasks.deadline_tasks.sweep_deadline_reminders")
 def sweep_deadline_reminders(organization_ids: list[int] | None = None) -> dict:
     """Hourly: send the deadline reminders that have come due."""
-    today = notifications.today_ist()
+    now = notifications.now_ist()
+    today = now.date()
     with task_session() as db:
         orgs = active_organizations(db, organization_ids=organization_ids)
         results = per_organization(
             db,
             orgs,
-            lambda session, org: _sweep_org_reminders(session, org, today=today),
+            lambda session, org: _sweep_org_reminders(session, org, today=today, now=now),
             task_name="sweep_deadline_reminders",
         )
     total = sum(r.get("sent", 0) for r in results)

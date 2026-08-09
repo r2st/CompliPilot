@@ -581,6 +581,17 @@ def breach_deadline_message(
     return subject, body
 
 
+def now_ist() -> datetime:
+    """The current instant, in IST.
+
+    A task that needs both the date and the hour takes this once and derives
+    both from it. Calling :func:`today_ist` and reading the clock again a few
+    milliseconds later is the same thing almost always and a different day at
+    18:30 UTC, which is the moment a nightly sweep is most likely to run.
+    """
+    return utcnow().astimezone(IST)
+
+
 def today_ist() -> date:
     """Today's date in IST.
 
@@ -589,4 +600,4 @@ def today_ist() -> date:
     and comparing an IST statutory deadline against a UTC date sends "1 day
     left" reminders on the wrong day around month boundaries.
     """
-    return utcnow().astimezone(IST).date()
+    return now_ist().date()
