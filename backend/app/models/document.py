@@ -5,7 +5,6 @@ from datetime import date, datetime
 
 from sqlalchemy import (
     Date,
-    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -21,6 +20,7 @@ from app.models.mixins import (
     OrgScopedMixin,
     SoftDeleteMixin,
     TimestampMixin,
+    UTCDateTime,
 )
 
 
@@ -72,7 +72,7 @@ class Document(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     )
     parsed_content: Mapped[str | None] = mapped_column(Text)
     parse_error: Mapped[str | None] = mapped_column(Text)
-    parsed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    parsed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # Which route produced the text: "pdf_text", "docx", "html", "ocr". Worth
     # recording because an OCR result deserves less trust than an extracted
     # text layer, and the UI says so.

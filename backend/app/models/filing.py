@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 from sqlalchemy import (
     Boolean,
     Date,
-    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -24,6 +23,7 @@ from app.models.mixins import (
     Paise,
     SoftDeleteMixin,
     TimestampMixin,
+    UTCDateTime,
     live_unique,
 )
 
@@ -92,7 +92,7 @@ class Filing(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # look at it afterwards" is the first question at an audit.
     is_ai_generated: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     ai_model: Mapped[str | None] = mapped_column(String(128))
-    ai_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ai_generated_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     ai_confidence: Mapped[int | None] = mapped_column()
     ai_notes: Mapped[str | None] = mapped_column(Text)
 
@@ -103,8 +103,8 @@ class Filing(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     reviewed_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    submitted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    submitted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     submitted_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
@@ -194,7 +194,7 @@ class Deadline(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # not also suppress the 7-day one, and so the sweep is idempotent: it sends
     # an offset only if the offset is absent from here.
     reminders_sent_json: Mapped[list | None] = mapped_column(JSONType)
-    last_reminder_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_reminder_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     # 0 = normal reminders. Raised once the date passes and the filing is still
     # open, which escalates who gets told: staff, then the compliance manager,
@@ -204,7 +204,7 @@ class Deadline(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # Cleared when the filing is submitted, so the sweep can skip it with an
     # index-only scan rather than joining to check the filing's status.
     is_satisfied: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    satisfied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    satisfied_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     filing: Mapped[Filing] = relationship()
 

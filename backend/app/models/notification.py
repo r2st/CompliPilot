@@ -5,7 +5,6 @@ from datetime import datetime
 
 from sqlalchemy import (
     Boolean,
-    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -21,6 +20,7 @@ from app.models.mixins import (
     OrgScopedMixin,
     SoftDeleteMixin,
     TimestampMixin,
+    UTCDateTime,
     live_unique,
 )
 
@@ -55,7 +55,7 @@ class Notification(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         nullable=False,
         index=True,
     )
-    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     error: Mapped[str | None] = mapped_column(Text)
     attempts: Mapped[int] = mapped_column(default=0, nullable=False)
     provider_message_id: Mapped[str | None] = mapped_column(String(255))

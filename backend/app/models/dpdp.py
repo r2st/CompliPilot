@@ -13,7 +13,6 @@ from datetime import date, datetime
 from sqlalchemy import (
     Boolean,
     Date,
-    DateTime,
     ForeignKey,
     Index,
     String,
@@ -27,6 +26,7 @@ from app.models.mixins import (
     OrgScopedMixin,
     SoftDeleteMixin,
     TimestampMixin,
+    UTCDateTime,
     live_unique,
 )
 
@@ -77,9 +77,9 @@ class ConsentRecord(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     notice_language: Mapped[str] = mapped_column(String(16), nullable=False, default="en")
 
     is_granted: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    granted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    withdrawn_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    granted_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    withdrawn_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     # How it was collected: "web_form", "app", "paper", "api". Plus the
     # evidence trail — IP and the request id at the moment of collection.
@@ -151,7 +151,7 @@ class DataMapEntry(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     processors_json: Mapped[list | None] = mapped_column(JSONType)
 
     estimated_record_count: Mapped[int | None] = mapped_column()
-    last_reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     notes: Mapped[str | None] = mapped_column(Text)
 
     __table_args__ = (
@@ -190,24 +190,24 @@ class BreachIncident(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         String(32), nullable=False, default="detected", index=True
     )
 
-    occurred_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    detected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    contained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    occurred_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    detected_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    contained_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     affected_principals_count: Mapped[int | None] = mapped_column()
     affected_data_categories_json: Mapped[list | None] = mapped_column(JSONType)
     affected_systems_json: Mapped[list | None] = mapped_column(JSONType)
 
     # --- Notification obligations ----------------------------------------
-    dpb_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    dpb_notified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     dpb_reference: Mapped[str | None] = mapped_column(String(128))
     dpb_notification_text: Mapped[str | None] = mapped_column(Text)
-    principals_notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    principals_notified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     principals_notification_text: Mapped[str | None] = mapped_column(Text)
 
     root_cause: Mapped[str | None] = mapped_column(Text)
     remediation: Mapped[str | None] = mapped_column(Text)
-    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     reported_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
@@ -252,13 +252,13 @@ class DataSubjectRequest(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
         String(32), nullable=False, default="received", index=True
     )
 
-    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    received_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
     due_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
     # An unverified requester must not be handed someone else's data, so
     # verification is a distinct step with its own timestamp rather than an
     # assumption baked into ``received_at``.
-    verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    verified_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
+    completed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     response: Mapped[str | None] = mapped_column(Text)
     rejection_reason: Mapped[str | None] = mapped_column(Text)
@@ -309,7 +309,7 @@ class PrivacyImpactAssessment(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMi
     reviewed_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
-    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    reviewed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     next_review_date: Mapped[date | None] = mapped_column(Date)
 
     __table_args__ = (

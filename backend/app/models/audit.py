@@ -20,7 +20,6 @@ from datetime import datetime
 
 from sqlalchemy import (
     BigInteger,
-    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -33,7 +32,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
 from app.models.enums import AuditAction
-from app.models.mixins import JSONType, utcnow
+from app.models.mixins import JSONType, UTCDateTime, utcnow
 
 # The checksum stored for the first entry of a chain, standing in for "the
 # previous entry" that does not exist. A constant rather than NULL so the
@@ -98,7 +97,7 @@ class AuditTrail(Base):
     # a ``server_default`` would be assigned after, and every verification
     # would fail.
     timestamp: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=utcnow, index=True
+        UTCDateTime, nullable=False, default=utcnow, index=True
     )
 
     # Section 4.7: "who did what, when, from which IP, and the before/after

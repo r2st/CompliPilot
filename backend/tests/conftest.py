@@ -129,8 +129,15 @@ _email_counter = {"n": 0}
 
 
 def _next_email(prefix: str) -> str:
+    """A unique address that also survives ``EmailStr``.
+
+    ``example.com`` rather than ``.test``: the latter is a reserved special-use
+    name, and ``email-validator`` — which every request body with an ``EmailStr``
+    field runs through — refuses it. A fixture address that cannot be posted to
+    the API is a fixture that only works for tests which never call one.
+    """
     _email_counter["n"] += 1
-    return f"{prefix}{_email_counter['n']}@example.test"
+    return f"{prefix}{_email_counter['n']}@example.com"
 
 
 def make_org(

@@ -22,7 +22,7 @@ from typing import ClassVar
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, func, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, declared_attr, mapped_column
-from sqlalchemy.types import JSON
+from sqlalchemy.types import JSON, TypeDecorator
 
 # JSONB on Postgres (indexable, typed) and plain JSON on SQLite (tests).
 JSONType = JSON().with_variant(JSONB, "postgresql")
@@ -45,6 +45,44 @@ RUPEE = 100
 def utcnow() -> datetime:
     """Timezone-aware now, for defaults set in Python rather than by the DB."""
     return datetime.now(UTC)
+
+
+class UTCDateTime(TypeDecorator):
+    """A timestamp that comes back timezone-aware on every backend.
+
+    ``DateTime(timezone=True)`` is TIMESTAMPTZ on Postgres and psycopg returns
+    an aware value. SQLite has no timestamp type at all, so the same column
+    returns a *naive* datetime there — and code that compares it against
+    ``datetime.now(UTC)`` raises ``TypeError: can't compare offset-naive and
+    offset-aware datetimes``.
+
+    That gap is worth closing rather than working around at each comparison,
+    for one reason: the test suite runs on SQLite. A model layer that hands
+    back a different type under test than in production means either the suite
+    reports failures production would not have, or — the expensive direction —
+    it passes on a comparison that would have been written differently had the
+    types matched. The account-lockout check was the second kind.
+
+    Stored values are normalised to UTC on the way in, so a naive value written
+    by a caller that forgot is not silently recorded as local time.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
+
+    def process_result_value(self, value: datetime | None, dialect) -> datetime | None:
+        if value is None:
+            return None
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
 
 def live_unique(name: str, *columns: str) -> Index:
@@ -82,10 +120,10 @@ class TimestampMixin:
     """``created_at`` / ``updated_at``, maintained by the database."""
 
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), nullable=False
+        UTCDateTime, server_default=func.now(), nullable=False
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UTCDateTime,
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
@@ -101,7 +139,7 @@ class SoftDeleteMixin:
     """
 
     deleted_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True, index=True
+        UTCDateTime, nullable=True, index=True
     )
 
     @property

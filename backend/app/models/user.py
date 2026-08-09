@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import (
     Boolean,
-    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -16,7 +15,13 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 from app.models.enums import UserRole
-from app.models.mixins import OrgScopedMixin, SoftDeleteMixin, TimestampMixin, live_unique
+from app.models.mixins import (
+    OrgScopedMixin,
+    SoftDeleteMixin,
+    TimestampMixin,
+    UTCDateTime,
+    live_unique,
+)
 
 if TYPE_CHECKING:
     from app.models.organization import Organization
@@ -51,14 +56,14 @@ class User(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # but never proved by a valid code must not lock anyone out, and must not
     # count as second-factor coverage either.
     totp_secret: Mapped[str | None] = mapped_column(String(255))
-    totp_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    totp_confirmed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
-    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     # Set on a failed login and cleared on a successful one. Used for the
     # lockout window, so that a stolen password list cannot be walked through
     # the login endpoint at full speed.
     failed_login_count: Mapped[int] = mapped_column(default=0, nullable=False)
-    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_until: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
     organization: Mapped["Organization"] = relationship(  # noqa: F821,UP037
         back_populates="users"

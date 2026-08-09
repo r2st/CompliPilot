@@ -6,7 +6,6 @@ from datetime import date, datetime
 from sqlalchemy import (
     Boolean,
     Date,
-    DateTime,
     Enum,
     ForeignKey,
     Index,
@@ -22,6 +21,7 @@ from app.models.mixins import (
     OrgScopedMixin,
     SoftDeleteMixin,
     TimestampMixin,
+    UTCDateTime,
     live_unique,
 )
 
@@ -84,7 +84,7 @@ class RegulatoryUpdate(Base, TimestampMixin, SoftDeleteMixin):
     # sweep picks up rows where this is false, so a mapper crash resumes
     # rather than skipping.
     is_analysed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    analysed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    analysed_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     is_published: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     metadata_json: Mapped[dict | None] = mapped_column(JSONType)
@@ -136,7 +136,7 @@ class RegulatoryImpact(Base, OrgScopedMixin, TimestampMixin, SoftDeleteMixin):
     # Acknowledgement, so an alert can be cleared without being deleted. The
     # audit trail records who cleared it and when.
     is_acknowledged: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    acknowledged_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
     acknowledged_by_id: Mapped[int | None] = mapped_column(
         ForeignKey("users.id", ondelete="SET NULL")
     )
