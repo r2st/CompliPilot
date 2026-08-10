@@ -154,7 +154,7 @@ export const documentsApi = {
     filing_id?: number;
   }) => apiRequest<Page<DocumentSummary>>("/documents", { query: params }),
   get: (id: number) => apiRequest<DocumentResponse>(`/documents/${id}`),
-  upload: (file: File, extra?: { type?: string; title?: string; regulation?: string }) =>
+  upload: (file: File, extra?: { type?: string; title?: string; regulation?: string; filing_id?: string }) =>
     apiUpload<DocumentUploadResponse>("/documents", file, extra),
   update: (id: number, payload: Record<string, unknown>) =>
     apiRequest<DocumentResponse>(`/documents/${id}`, { method: "PATCH", body: payload }),
