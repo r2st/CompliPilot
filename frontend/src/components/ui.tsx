@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { Children, cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from "react";
 import { humanize } from "@/lib/format";
 
 export function Card({
@@ -177,15 +177,33 @@ export function Select(props: React.SelectHTMLAttributes<HTMLSelectElement>) {
   );
 }
 
-export function Label({ children }: { children: ReactNode }) {
-  return <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">{children}</label>;
+export function Label({ children, htmlFor }: { children: ReactNode; htmlFor?: string }) {
+  return (
+    <label htmlFor={htmlFor} className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+      {children}
+    </label>
+  );
 }
 
 export function Field({ label, children }: { label: string; children: ReactNode }) {
+  const id = useId();
+  // The control is always the first child (a helper <p> or similar may
+  // follow, e.g. the TOTP hint on the login page) — cloning only that one
+  // wires the label to the actual input without touching its siblings, and
+  // leaves an id the caller already set alone.
+  const [control, ...rest] = Children.toArray(children);
+  const hasOwnId = isValidElement<{ id?: string }>(control) && !!control.props.id;
+  const labelable =
+    isValidElement<{ id?: string }>(control) && !hasOwnId
+      ? cloneElement(control as ReactElement<{ id?: string }>, { id })
+      : control;
+  const forId = hasOwnId ? (control as ReactElement<{ id?: string }>).props.id : id;
+
   return (
     <div>
-      <Label>{label}</Label>
-      {children}
+      <Label htmlFor={forId}>{label}</Label>
+      {labelable}
+      {rest}
     </div>
   );
 }
