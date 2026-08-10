@@ -819,21 +819,41 @@ class TestParsePipeline:
         assert document.parsed_content == "Some text."
         assert "analysis unavailable" in document.parse_error
 
-    def test_a_relative_storage_path_is_resolved_against_the_upload_root(
-        self, db, company, upload_root
+    def test_a_relative_upload_root_is_not_double_prefixed(
+        self, db, company, monkeypatch, tmp_path
     ):
-        _write(upload_root, company.id, "relative.txt", b"Found via the root.")
+        """``UPLOAD_DIR``'s documented default, ``"data/documents"``, is
+        relative — every other test in this class points it at an absolute
+        ``upload_root`` instead, which is what let a double-prefixing bug
+        here go unnoticed for a relative root.
+
+        ``storage_path`` is written by :func:`app.routers.documents._store`
+        as ``_storage_root() / org_id / filename`` — it already carries
+        whatever the root resolved to, exactly as
+        :func:`app.routers.documents.download_document` reads it back with
+        no reconstruction. A parser that re-joined the root onto that value
+        would look for the file twice as deep and never find it.
+        """
+        from app.core.config import settings
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(settings, "upload_dir", "data/documents")
+
+        directory = tmp_path / "data" / "documents" / str(company.id)
+        directory.mkdir(parents=True)
+        (directory / "relative.txt").write_bytes(b"Found via the relative root.")
+
         document = make_document(
             db,
             company,
-            storage_path=f"{company.id}/relative.txt",
+            storage_path=f"data/documents/{company.id}/relative.txt",
             mime_type="text/plain",
         )
 
         outcome = document_tasks.parse_document(db, document)
 
         assert outcome["status"] == "parsed"
-        assert document.parsed_content == "Found via the root."
+        assert document.parsed_content == "Found via the relative root."
 
 
 class TestDeadlineParsing:

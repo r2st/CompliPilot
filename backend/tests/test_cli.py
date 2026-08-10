@@ -35,6 +35,7 @@ from app.models.audit import AuditTrail
 from app.models.enums import AuditAction, OrgType, UserRole
 from app.models.obligation import ComplianceObligation
 from app.models.organization import Organization
+from app.models.regulatory import RegulatoryUpdate
 from app.models.user import User
 from app.services import audit as audit_service
 from tests.conftest import make_org
@@ -516,3 +517,246 @@ class TestCreateAdminRefusals:
 
         db.expire_all()
         assert len(db.execute(select(User)).scalars().all()) == 1
+
+
+# --------------------------------------------------------------------------
+# ingest-regulatory-update
+#
+# Nothing else in the application ever writes a RegulatoryUpdate row -- see
+# app.services.regulatory_ingestion's module docstring -- so this command is
+# the only way the analysis pipeline in app.tasks.regulatory_tasks ever has
+# anything to do. What matters is exactly what mattered for ``seed``:
+# idempotence (a scraper re-running against the same page must not duplicate
+# what it already sent), that a bad record in a batch does not sink the good
+# ones, and that a changed circular is put back in front of the analyser
+# rather than kept under its stale analysis.
+# --------------------------------------------------------------------------
+
+
+SINGLE_ARGS = [
+    "ingest-regulatory-update",
+    "--source",
+    "cbic",
+    "--title",
+    "Extension of GSTR-3B due date for July 2026",
+    "--published-date",
+    "2026-08-01",
+    "--reference-no",
+    "Circular 210/4/2026",
+    "--regulation",
+    "gst",
+    "--summary",
+    "Due date extended by five days.",
+]
+
+
+class TestIngestRegulatoryUpdateParser:
+    def test_without_a_file_the_three_core_fields_are_required(self, capsys):
+        """Not an argparse-level requirement, because they are only required
+        in the absence of ``--file`` -- so the refusal is this command's own,
+        on stderr with a non-zero exit, not a traceback."""
+        assert run(["ingest-regulatory-update"]) == 1
+        assert "--source" in capsys.readouterr().err
+
+    def test_a_file_that_is_not_a_json_list_is_refused(self, tmp_path, capsys):
+        path = tmp_path / "not-a-list.json"
+        path.write_text(json.dumps({"source": "cbic"}))
+
+        assert run(["ingest-regulatory-update", "--file", str(path)]) == 1
+        assert "list" in capsys.readouterr().err
+
+
+class TestIngestRegulatoryUpdateSingle:
+    def test_it_creates_the_row(self, db):
+        assert run(SINGLE_ARGS) == 0
+
+        db.expire_all()
+        row = db.query(RegulatoryUpdate).one()
+        assert row.source == "cbic"
+        assert row.reference_no == "Circular 210/4/2026"
+        assert row.title == "Extension of GSTR-3B due date for July 2026"
+        assert row.regulation == "gst"
+        assert row.summary == "Due date extended by five days."
+
+    def test_it_lands_where_the_analyser_will_find_it(self, db):
+        """The whole point: is_analysed = False is the sweep's query."""
+        run(SINGLE_ARGS)
+
+        db.expire_all()
+        row = db.query(RegulatoryUpdate).one()
+        assert row.is_analysed is False
+        assert row.is_published is False
+
+    def test_it_commits(self, db):
+        run(SINGLE_ARGS)
+
+        db.rollback()
+        assert db.query(RegulatoryUpdate).count() == 1
+
+    def test_it_reports_what_it_did(self, capsys):
+        run(SINGLE_ARGS)
+
+        assert as_json(capsys) == {
+            "created": 1,
+            "updated": 0,
+            "unchanged": 0,
+            "errors": [],
+        }
+
+    def test_running_it_again_unchanged_does_not_duplicate_or_requeue(self, db, capsys):
+        """A scraper re-fetching a page it has already sent must not put the
+        row back in the analysis queue, or a daily re-scrape would re-queue
+        the entire archive every morning."""
+        run(SINGLE_ARGS)
+        db.expire_all()
+        row = db.query(RegulatoryUpdate).one()
+        row.is_analysed = True
+        db.commit()
+        capsys.readouterr()
+
+        assert run(SINGLE_ARGS) == 0
+
+        db.expire_all()
+        assert db.query(RegulatoryUpdate).count() == 1
+        assert db.query(RegulatoryUpdate).one().is_analysed is True
+        assert as_json(capsys) == {
+            "created": 0,
+            "updated": 0,
+            "unchanged": 1,
+            "errors": [],
+        }
+
+    def test_a_changed_field_updates_the_same_row_and_requeues_it(self, db, capsys):
+        """A regulator amending a circular after publication is real; the row
+        must be put back in front of the analyser rather than kept under an
+        analysis of text that no longer matches it."""
+        run(SINGLE_ARGS)
+        db.expire_all()
+        original = db.query(RegulatoryUpdate).one()
+        original.is_analysed = True
+        original.is_published = True
+        db.commit()
+        original_id = original.id
+        capsys.readouterr()
+
+        argv = list(SINGLE_ARGS)
+        argv[argv.index("--summary") + 1] = "Due date extended by seven days, revised."
+        assert run(argv) == 0
+
+        db.expire_all()
+        assert db.query(RegulatoryUpdate).count() == 1
+        row = db.query(RegulatoryUpdate).one()
+        assert row.id == original_id
+        assert row.summary == "Due date extended by seven days, revised."
+        assert row.is_analysed is False
+        assert row.is_published is False
+        assert as_json(capsys) == {
+            "created": 0,
+            "updated": 1,
+            "unchanged": 0,
+            "errors": [],
+        }
+
+    def test_two_records_with_no_reference_number_update_rather_than_duplicate(self, db):
+        """SQL's partial unique index treats two NULL reference numbers as
+        distinct, which is right for the index's own job but wrong for a
+        re-ingest of the same unnumbered circular -- this command matches in
+        Python instead so the second run revises the first row."""
+        argv = [
+            "ingest-regulatory-update",
+            "--source",
+            "egazette",
+            "--title",
+            "Notification without a reference number",
+            "--published-date",
+            "2026-08-01",
+        ]
+
+        assert run(argv) == 0
+        assert run([*argv, "--summary", "Now with a summary"]) == 0
+
+        db.expire_all()
+        assert db.query(RegulatoryUpdate).count() == 1
+        assert db.query(RegulatoryUpdate).one().summary == "Now with a summary"
+
+    def test_an_invalid_regulation_is_refused_before_any_write(self, db, capsys):
+        with pytest.raises(SystemExit):
+            run([*SINGLE_ARGS, "--regulation", "not-a-real-regulator"])
+
+        assert db.query(RegulatoryUpdate).count() == 0
+
+    def test_the_domains_flag_splits_on_commas(self, db):
+        argv = [*SINGLE_ARGS, "--domains", "fema,rbi"]
+
+        run(argv)
+
+        db.expire_all()
+        assert sorted(db.query(RegulatoryUpdate).one().domains_json) == ["fema", "rbi"]
+
+
+class TestIngestRegulatoryUpdateBatch:
+    def test_a_batch_creates_every_valid_record(self, db, tmp_path):
+        records = [
+            {
+                "source": "mca",
+                "title": "Amendment to the MGT-7 filing format",
+                "published_date": "2026-07-15",
+                "regulation": "mca",
+            },
+            {
+                "source": "rbi",
+                "title": "Revised FEMA reporting timeline",
+                "published_date": "2026-07-20",
+                "regulation": "fema",
+                "source_url": "https://rbi.example/notice",
+            },
+        ]
+        path = tmp_path / "batch.json"
+        path.write_text(json.dumps(records))
+
+        assert run(["ingest-regulatory-update", "--file", str(path)]) == 0
+
+        db.expire_all()
+        assert db.query(RegulatoryUpdate).count() == 2
+
+    def test_one_bad_record_does_not_sink_the_good_ones_in_the_batch(
+        self, db, tmp_path, capsys
+    ):
+        """The property that makes this usable on a thousand-row scrape: a
+        single malformed page must be reported, not lose everything after it."""
+        records = [
+            {
+                "source": "mca",
+                "title": "A well-formed record",
+                "published_date": "2026-07-15",
+            },
+            {"source": "rbi", "title": "Missing its published date"},
+            {
+                "source": "sebi",
+                "title": "Another well-formed record",
+                "published_date": "2026-07-16",
+            },
+        ]
+        path = tmp_path / "batch.json"
+        path.write_text(json.dumps(records))
+
+        assert run(["ingest-regulatory-update", "--file", str(path)]) == 1
+
+        db.expire_all()
+        assert db.query(RegulatoryUpdate).count() == 2
+        result = as_json(capsys)
+        assert result["created"] == 2
+        assert len(result["errors"]) == 1
+        assert "record 1" in result["errors"][0]
+        assert "published_date" in result["errors"][0]
+
+    def test_a_missing_file_is_reported_not_a_traceback(self, capsys):
+        assert run(["ingest-regulatory-update", "--file", "/no/such/file.json"]) == 1
+        assert "/no/such/file.json" in capsys.readouterr().err
+
+    def test_malformed_json_is_reported_not_a_traceback(self, tmp_path, capsys):
+        path = tmp_path / "broken.json"
+        path.write_text("{not valid json")
+
+        assert run(["ingest-regulatory-update", "--file", str(path)]) == 1
+        assert "not valid JSON" in capsys.readouterr().err

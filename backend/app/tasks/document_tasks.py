@@ -22,7 +22,6 @@ from datetime import date, datetime
 from sqlalchemy import select
 
 from app.celery_app import celery_app
-from app.core.config import settings
 from app.models.document import Document
 from app.models.enums import AuditAction, ParseStatus
 from app.models.mixins import utcnow
@@ -119,11 +118,15 @@ def parse_document(db, document: Document) -> dict:
     document.parse_status = ParseStatus.PROCESSING
     db.flush()
 
-    storage_root = settings.upload_dir
-    path = document.storage_path
-    # Stored paths are relative to the upload root so the directory can be
-    # moved between deployments; an absolute one is honoured as-is.
-    full_path = path if path.startswith("/") else f"{storage_root.rstrip('/')}/{path}"
+    # ``storage_path`` is written by ``app.routers.documents._store`` as
+    # ``_storage_root() / org_id / filename`` and is already anchored at
+    # whatever ``upload_dir`` resolved to at upload time — absolute if
+    # ``upload_dir`` is, relative to the process's working directory
+    # otherwise. Re-prepending ``upload_dir`` here would double it for a
+    # relative root (the documented default, "data/documents") and every
+    # parse would fail with "no file at ...". The download route reads the
+    # same column the same way, with no reconstruction.
+    full_path = document.storage_path
 
     try:
         text, method = extraction.extract_text(full_path, mime_type=document.mime_type)

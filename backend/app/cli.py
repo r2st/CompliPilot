@@ -2,11 +2,12 @@
 
 Kept to operations that genuinely have no home in the API — seeding the system
 catalogue, verifying an audit chain, minting the first administrator on a fresh
-deployment. Anything a user can do, they do through the API, so that it is
-authenticated, rate limited and recorded in the audit trail.
+deployment, loading regulatory updates for the analysis pipeline. Anything a
+user can do, they do through the API, so that it is authenticated, rate
+limited and recorded in the audit trail.
 
-The three commands here are the exceptions, and each is an exception for a
-reason stated at its definition.
+The commands here are the exceptions, and each is an exception for a reason
+stated at its definition.
 """
 from __future__ import annotations
 
@@ -19,7 +20,7 @@ from sqlalchemy import select
 from app.core.database import SessionLocal
 from app.core.logging import configure_logging
 from app.core.security import hash_password
-from app.models.enums import AuditAction, OrgType, UserRole
+from app.models.enums import AuditAction, OrgType, Regulation, UserRole
 from app.models.organization import Organization
 from app.models.user import User
 from app.services import audit as audit_service
@@ -48,6 +49,66 @@ def cmd_catalogue(args: argparse.Namespace) -> int:
 
     print(json.dumps(coverage_summary(), indent=2))
     return 0
+
+
+def cmd_ingest_regulatory_update(args: argparse.Namespace) -> int:
+    """Load one or more regulatory updates for the analysis pipeline to pick up.
+
+    Exists here rather than as an API route for the reason stated in the
+    module docstring: a :class:`~app.models.regulatory.RegulatoryUpdate` is
+    system-wide data with no tenant to own it, and there is no organization
+    Admin this should be delegated to — trusting any tenant to inject rows
+    every other tenant sees as an official circular is not a risk this
+    product takes on. A scheduled scraper, or an operator who has read a
+    circular and wants it on the record, runs this instead.
+
+    ``--file`` takes a JSON array of records for a batch (what a scraper
+    would produce); the individual flags are for entering one by hand. Either
+    way each record needs at least ``source``, ``title`` and a
+    ``published_date``; see :mod:`app.services.regulatory_ingestion` for the
+    full field set and the idempotency rule.
+    """
+    from app.services.regulatory_ingestion import ingest_updates
+
+    if args.file:
+        try:
+            with open(args.file, encoding="utf-8") as handle:
+                records = json.load(handle)
+        except OSError as exc:
+            print(f"Could not read {args.file}: {exc}", file=sys.stderr)
+            return 1
+        except json.JSONDecodeError as exc:
+            print(f"{args.file} is not valid JSON: {exc}", file=sys.stderr)
+            return 1
+        if not isinstance(records, list):
+            print("The JSON file must contain a list of update objects", file=sys.stderr)
+            return 1
+    else:
+        if not (args.source and args.title and args.published_date):
+            print(
+                "--source, --title and --published-date are required without --file",
+                file=sys.stderr,
+            )
+            return 1
+        records = [
+            {
+                "source": args.source,
+                "title": args.title,
+                "published_date": args.published_date,
+                "reference_no": args.reference_no,
+                "source_url": args.source_url,
+                "effective_date": args.effective_date,
+                "regulation": args.regulation,
+                "domains": args.domains.split(",") if args.domains else None,
+                "summary": args.summary,
+                "content": args.content,
+            }
+        ]
+
+    with SessionLocal() as db:
+        result = ingest_updates(db, records)
+    print(json.dumps(result.as_dict(), indent=2))
+    return 1 if result.errors else 0
 
 
 def cmd_verify_audit(args: argparse.Namespace) -> int:
@@ -160,6 +221,27 @@ def build_parser() -> argparse.ArgumentParser:
     admin.add_argument("--password", required=True)
     admin.add_argument("--type", default="company", choices=[t.value for t in OrgType])
     admin.set_defaults(func=cmd_create_admin)
+
+    ingest = sub.add_parser(
+        "ingest-regulatory-update",
+        help="Load one or more regulatory updates for the analysis pipeline",
+    )
+    ingest.add_argument(
+        "--file", default=None, help="A JSON file holding a list of update records"
+    )
+    ingest.add_argument("--source", default=None, help='e.g. "cbic", "mca", "rbi"')
+    ingest.add_argument("--title", default=None)
+    ingest.add_argument("--published-date", default=None, help="YYYY-MM-DD")
+    ingest.add_argument("--reference-no", default=None)
+    ingest.add_argument("--source-url", default=None)
+    ingest.add_argument("--effective-date", default=None, help="YYYY-MM-DD")
+    ingest.add_argument("--regulation", default=None, choices=[r.value for r in Regulation])
+    ingest.add_argument(
+        "--domains", default=None, help="Comma-separated regulation codes, if more than one applies"
+    )
+    ingest.add_argument("--summary", default=None)
+    ingest.add_argument("--content", default=None, help="The circular's full text, if available")
+    ingest.set_defaults(func=cmd_ingest_regulatory_update)
 
     return parser
 
