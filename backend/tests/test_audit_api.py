@@ -356,7 +356,7 @@ class TestListFilters:
         body = app_client.get(
             f"{API}/audit",
             headers=auth(company_admin),
-            params={"start_date": date.today().isoformat()},
+            params={"start_date": utcnow().date().isoformat()},
         ).json()
 
         assert [e["summary"] for e in body["items"]] == ["today"]
@@ -369,13 +369,18 @@ class TestListFilters:
         Comparing a timestamp against the bare date would silently drop
         everything that happened on the last day of the window — the day a
         reviewer investigating an incident cares most about.
+
+        The window is anchored to UTC, the frame entries are actually
+        timestamped in — not ``date.today()``, which is the host's local date
+        and drifts a calendar day away from UTC for several hours around every
+        midnight UTC, failing this test on nothing but the clock.
         """
         entry(db, company, summary="this afternoon")
 
         body = app_client.get(
             f"{API}/audit",
             headers=auth(company_admin),
-            params={"end_date": date.today().isoformat()},
+            params={"end_date": utcnow().date().isoformat()},
         ).json()
 
         assert [e["summary"] for e in body["items"]] == ["this afternoon"]
@@ -386,7 +391,7 @@ class TestListFilters:
         backdate(db, entry(db, company, summary="too old"), days=10)
         backdate(db, entry(db, company, summary="inside"), days=3)
         entry(db, company, summary="too new")
-        today = date.today()
+        today = utcnow().date()
 
         body = app_client.get(
             f"{API}/audit",
@@ -812,7 +817,7 @@ class TestExport:
         header, rows = export(
             app_client,
             company_admin,
-            start_date=(date.today() - timedelta(days=7)).isoformat(),
+            start_date=(utcnow().date() - timedelta(days=7)).isoformat(),
         )
 
         assert [r[header.index("summary")] for r in rows] == ["this month"]
