@@ -16,6 +16,7 @@ const NAV: { href: string; label: string; minRole: number; caFirmOnly?: boolean 
   { href: "/obligations", label: "Obligations", minRole: 0 },
   { href: "/clients", label: "Clients", minRole: 0, caFirmOnly: true },
   { href: "/documents", label: "Documents", minRole: 0 },
+  { href: "/dpdp", label: "DPDP toolkit", minRole: 0 },
   { href: "/alerts", label: "Alerts", minRole: 0 },
   { href: "/audit", label: "Audit trail", minRole: 2 },
   { href: "/settings", label: "Settings", minRole: 0 },

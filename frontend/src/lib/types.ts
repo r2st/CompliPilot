@@ -423,6 +423,137 @@ export interface RegulatoryImpactResponse {
   update: RegulatoryUpdateResponse | null;
 }
 
+// --- DPDP toolkit ----------------------------------------------------------
+
+export type DsrType = "access" | "correction" | "erasure" | "nomination" | "grievance" | "withdraw_consent";
+export type DsrStatus = "received" | "verifying" | "in_progress" | "completed" | "rejected";
+export type BreachSeverity = "low" | "medium" | "high" | "critical";
+export type BreachStatus = "open" | "contained" | "notified" | "closed";
+export type LegalBasis = "consent" | "legitimate_use" | "legal_obligation" | "contract" | "vital_interest";
+export type PiaStatus = "draft" | "approved";
+
+export interface ConsentRecordResponse {
+  id: number;
+  organization_id: number;
+  principal_type: string;
+  purpose: string;
+  purpose_description: string | null;
+  data_categories_json: string[] | null;
+  notice_version: string;
+  notice_language: string;
+  is_granted: boolean;
+  granted_at: string | null;
+  withdrawn_at: string | null;
+  expires_at: string | null;
+  collection_method: string | null;
+  created_at: string;
+  principal_ref: string | null;
+}
+
+export interface DataMapEntryResponse {
+  id: number;
+  organization_id: number;
+  system_name: string;
+  system_type: string | null;
+  owner_team: string | null;
+  data_category: string;
+  data_fields_json: string[] | null;
+  is_sensitive: boolean;
+  purpose: string;
+  legal_basis: LegalBasis;
+  retention_period_days: number | null;
+  is_transferred_abroad: boolean;
+  transfer_countries_json: string[] | null;
+  processors_json: string[] | null;
+  estimated_record_count: number | null;
+  last_reviewed_at: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface BreachIncidentResponse {
+  id: number;
+  organization_id: number;
+  reference: string;
+  title: string;
+  description: string | null;
+  severity: BreachSeverity;
+  status: BreachStatus;
+  occurred_at: string | null;
+  detected_at: string;
+  contained_at: string | null;
+  affected_principals_count: number | null;
+  affected_data_categories_json: string[] | null;
+  affected_systems_json: string[] | null;
+  dpb_notified_at: string | null;
+  dpb_reference: string | null;
+  principals_notified_at: string | null;
+  root_cause: string | null;
+  remediation: string | null;
+  closed_at: string | null;
+  reported_by_id: number | null;
+  created_at: string;
+  hours_until_dpb_deadline: number | null;
+  dpb_notification_overdue: boolean | null;
+}
+
+export interface DataSubjectRequestResponse {
+  id: number;
+  organization_id: number;
+  reference: string;
+  request_type: DsrType;
+  principal_name: string | null;
+  details: string | null;
+  status: DsrStatus;
+  received_at: string;
+  due_date: string;
+  verified_at: string | null;
+  completed_at: string | null;
+  response: string | null;
+  rejection_reason: string | null;
+  assigned_to_id: number | null;
+  created_at: string;
+  days_until_due: number | null;
+  is_overdue: boolean | null;
+  principal_ref: string | null;
+}
+
+export interface PIAResponse {
+  id: number;
+  organization_id: number;
+  title: string;
+  processing_activity: string;
+  status: PiaStatus | string;
+  answers_json: Record<string, unknown> | null;
+  template_id: number | null;
+  risk_score: number | null;
+  risk_level: string | null;
+  risk_rationale: string | null;
+  ai_model: string | null;
+  mitigations_json: string[] | null;
+  residual_risk: string | null;
+  reviewed_by_id: number | null;
+  reviewed_at: string | null;
+  next_review_date: string | null;
+  created_at: string;
+}
+
+export interface DPDPReadinessResponse {
+  has_data_map: boolean;
+  data_map_entries: number;
+  consent_records: number;
+  active_consents: number;
+  withdrawn_consents: number;
+  open_breaches: number;
+  overdue_dpb_notifications: number;
+  open_data_requests: number;
+  overdue_data_requests: number;
+  completed_assessments: number;
+  cross_border_transfers: number;
+  score: number;
+  gaps: string[];
+}
+
 // --- Audit ---------------------------------------------------------------
 
 export interface AuditEntryResponse {

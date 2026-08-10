@@ -2,12 +2,17 @@ import { apiRequest, apiUpload } from "./api";
 import type {
   AlertSummary,
   AuditEntryResponse,
+  BreachIncidentResponse,
   CalendarResponse,
   ClientResponse,
+  ConsentRecordResponse,
   DashboardResponse,
+  DataMapEntryResponse,
+  DataSubjectRequestResponse,
   DocumentResponse,
   DocumentSummary,
   DocumentUploadResponse,
+  DPDPReadinessResponse,
   FilingResponse,
   FilingStatus,
   FilingSummary,
@@ -17,6 +22,7 @@ import type {
   ObligationResponse,
   OrganizationResponse,
   Page,
+  PIAResponse,
   Regulation,
   RegulatoryImpactResponse,
   SessionContextResponse,
@@ -173,6 +179,63 @@ export const alertsApi = {
 export const auditApi = {
   list: (params?: { limit?: number; offset?: number; entity_type?: string; action?: string }) =>
     apiRequest<Page<AuditEntryResponse>>("/audit", { query: params }),
+};
+
+// --- DPDP toolkit ----------------------------------------------------------
+
+export const dpdpApi = {
+  readiness: () => apiRequest<DPDPReadinessResponse>("/dpdp/readiness"),
+
+  consents: {
+    list: (params?: { limit?: number; offset?: number; purpose?: string; granted_only?: boolean; principal_ref?: string }) =>
+      apiRequest<Page<ConsentRecordResponse>>("/dpdp/consents", { query: params }),
+    create: (payload: Record<string, unknown>) =>
+      apiRequest<ConsentRecordResponse>("/dpdp/consents", { method: "POST", body: payload }),
+    withdraw: (id: number, reason?: string) =>
+      apiRequest<ConsentRecordResponse>(`/dpdp/consents/${id}/withdraw`, { method: "POST", body: { reason } }),
+  },
+
+  dataMap: {
+    list: (params?: { limit?: number; offset?: number; sensitive_only?: boolean; cross_border_only?: boolean }) =>
+      apiRequest<Page<DataMapEntryResponse>>("/dpdp/data-map", { query: params }),
+    create: (payload: Record<string, unknown>) =>
+      apiRequest<DataMapEntryResponse>("/dpdp/data-map", { method: "POST", body: payload }),
+    update: (id: number, payload: Record<string, unknown>) =>
+      apiRequest<DataMapEntryResponse>(`/dpdp/data-map/${id}`, { method: "PATCH", body: payload }),
+    remove: (id: number) => apiRequest<{ message: string }>(`/dpdp/data-map/${id}`, { method: "DELETE" }),
+  },
+
+  breaches: {
+    list: (params?: { limit?: number; offset?: number; open_only?: boolean; unnotified_only?: boolean }) =>
+      apiRequest<Page<BreachIncidentResponse>>("/dpdp/breaches", { query: params }),
+    create: (payload: Record<string, unknown>) =>
+      apiRequest<BreachIncidentResponse>("/dpdp/breaches", { method: "POST", body: payload }),
+    update: (id: number, payload: Record<string, unknown>) =>
+      apiRequest<BreachIncidentResponse>(`/dpdp/breaches/${id}`, { method: "PATCH", body: payload }),
+    notify: (id: number, payload: { dpb_reference?: string; notification_text?: string; notify_principals?: boolean }) =>
+      apiRequest<BreachIncidentResponse>(`/dpdp/breaches/${id}/notify`, { method: "POST", body: payload }),
+  },
+
+  requests: {
+    list: (params?: { limit?: number; offset?: number; request_type?: string; open_only?: boolean; overdue_only?: boolean }) =>
+      apiRequest<Page<DataSubjectRequestResponse>>("/dpdp/requests", { query: params }),
+    create: (payload: Record<string, unknown>) =>
+      apiRequest<DataSubjectRequestResponse>("/dpdp/requests", { method: "POST", body: payload }),
+    update: (id: number, payload: Record<string, unknown>) =>
+      apiRequest<DataSubjectRequestResponse>(`/dpdp/requests/${id}`, { method: "PATCH", body: payload }),
+  },
+
+  assessments: {
+    list: (params?: { limit?: number; offset?: number; status?: string }) =>
+      apiRequest<Page<PIAResponse>>("/dpdp/assessments", { query: params }),
+    create: (payload: Record<string, unknown>) =>
+      apiRequest<PIAResponse>("/dpdp/assessments", { method: "POST", body: payload }),
+    review: (id: number, nextReviewMonths?: number) =>
+      apiRequest<PIAResponse>(`/dpdp/assessments/${id}/review`, {
+        method: "POST",
+        query: nextReviewMonths ? { next_review_months: nextReviewMonths } : undefined,
+      }),
+  },
 };
 
 // --- Organizations -------------------------------------------------------
