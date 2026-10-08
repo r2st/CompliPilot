@@ -45,3 +45,7 @@ keys/
 !.env.example
 yarn-error.log*
 pnpm-debug.log*
+
+# Environment
+.env*
+!.env.example
